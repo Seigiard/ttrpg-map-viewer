@@ -86,7 +86,7 @@ function selectCover(map: MapNode, filesPath: string): Effect.Effect<FileListing
   const candidates = stillVariants.length > 0 ? stillVariants : map.variants;
 
   return Effect.forEach(candidates, (variant) =>
-    pixelArea(join(filesPath, map.path, variant.name)).pipe(
+    pixelArea(join(filesPath, map.sourcePath, variant.name)).pipe(
       Effect.map((area): CoverCandidate => ({ variant, score: preferenceScore(variant.name), area })),
     ),
   ).pipe(

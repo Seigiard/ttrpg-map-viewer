@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
@@ -19,6 +19,20 @@ let workDir: string;
 let collection: string;
 
 let output: string;
+
+interface GenerateLog {
+  readonly msg: string;
+  readonly path?: string;
+  readonly size?: number;
+  readonly variants?: number;
+  readonly zipArchives?: number;
+  readonly likelyDumps?: number;
+}
+
+function parseGenerateLog(message: string): GenerateLog {
+  // SAFETY: this test captures only JSON emitted by the generator's logger.
+  return JSON.parse(message) as GenerateLog;
+}
 
 async function image(path: string, width: number, height: number, format: "jpeg" | "png" | "webp"): Promise<void> {
   await mkdir(join(path, ".."), { recursive: true });
@@ -301,5 +315,107 @@ describe("generateCatalog", () => {
     expect(czepekuIndex.cover.variant).toBe("ORIGINAL DAY.webp");
     expect(packIndex.cover.variant).toBe("Ruins_BaseDayGL.png");
     expect(overriddenIndex.cover.variant).toBe("Night.jpg");
+  });
+
+  test("writes a mixed folder's loose variants as a map with separate catalog and Original paths", async () => {
+    // #given
+    await image(join(collection, "Mixed", "Day.jpg"), TINY, TINY, "jpeg");
+    await image(join(collection, "Mixed", "Child", "Night.jpg"), TINY, TINY, "jpeg");
+
+    // #when
+    await generate();
+
+    const [category, looseMap] = await Promise.all([
+      readJson<CategoryIndex>(join(output, "Mixed", "index.json")),
+      readJson<MapIndex>(join(output, "Mixed", "._loose", "index.json")),
+    ]);
+
+    const looseVariantSize = (await stat(join(collection, "Mixed", "Day.jpg"))).size;
+
+    // #then
+    expect({ category, looseMap }).toEqual({
+      category: {
+        kind: "category",
+        name: "Mixed",
+        path: "Mixed",
+        categories: [],
+        maps: [
+          {
+            name: "Mixed",
+            path: "Mixed/._loose",
+            variantCount: 1,
+            cover: { variant: "Day.jpg", thumbnail: "Mixed/._loose/_thumbnails/Day.jpg.webp" },
+          },
+          {
+            name: "Child",
+            path: "Mixed/Child",
+            variantCount: 1,
+            cover: { variant: "Night.jpg", thumbnail: "Mixed/Child/_thumbnails/Night.jpg.webp" },
+          },
+        ],
+      },
+      looseMap: {
+        kind: "map",
+        name: "Mixed",
+        path: "Mixed/._loose",
+        originalPath: "Mixed",
+        cover: { variant: "Day.jpg", thumbnail: "Mixed/._loose/_thumbnails/Day.jpg.webp" },
+        variants: [
+          {
+            file: "Day.jpg",
+            size: looseVariantSize,
+            animated: false,
+            thumbnail: "Mixed/._loose/_thumbnails/Day.jpg.webp",
+            preview: "Mixed/._loose/_previews/Day.jpg.webp",
+          },
+        ],
+      },
+    });
+  });
+
+  test("logs all ZIP archives and maps with more than 60 variants as likely dumps", async () => {
+    // #given
+    const dump = join(collection, "battlemaps");
+    const archive = join(dump, "Archive.ZIP");
+    await image(join(dump, "Map 1.jpg"), TINY, TINY, "jpeg");
+    await Promise.all(Array.from({ length: 60 }, (_, index) => copyFile(join(dump, "Map 1.jpg"), join(dump, `Map ${index + 2}.jpg`))));
+    await writeFile(archive, "archive");
+    const originalLevel = process.env.LOG_LEVEL;
+    const originalLog = console.log;
+    const originalError = console.error;
+    const messages: GenerateLog[] = [];
+    process.env.LOG_LEVEL = "info";
+    console.log = (message: string) => messages.push(parseGenerateLog(message));
+    console.error = (message: string) => messages.push(parseGenerateLog(message));
+
+    // #when
+    try {
+      await generate();
+    } finally {
+      process.env.LOG_LEVEL = originalLevel;
+      console.log = originalLog;
+      console.error = originalError;
+    }
+
+    // #then
+    const [rootArchive, dumpArchive] = await Promise.all([
+      stat(join(collection, "Printable Maps.zip")),
+      stat(join(collection, "battlemaps", "Archive.ZIP")),
+    ]);
+
+    expect({
+      zipArchives: messages.flatMap(({ msg, path, size }) => (msg === "ZIP archive ignored" ? [{ path, size }] : [])),
+      likelyDumps: messages.flatMap(({ msg, path, variants }) => (msg === "Likely dump" ? [{ path, variants }] : [])),
+      summary: messages.flatMap(({ msg, zipArchives, likelyDumps }) =>
+        msg === "Collection diagnostics" ? [{ zipArchives, likelyDumps }] : [],
+      ),
+    }).toEqual({
+      zipArchives: [
+        { path: "battlemaps/Archive.ZIP", size: dumpArchive.size },
+        { path: "Printable Maps.zip", size: rootArchive.size },
+      ],
+      likelyDumps: [{ path: "battlemaps", variants: 61 }],
+      summary: [{ zipArchives: 2, likelyDumps: 1 }],
+    });
   });
 });

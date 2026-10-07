@@ -48,6 +48,8 @@ export interface MapIndex {
   readonly kind: "map";
   readonly name: string;
   readonly path: CatalogPath;
+  /** Collection-relative folder containing the Map's Originals. */
+  readonly originalPath: CatalogPath;
   readonly cover: Cover;
   readonly variants: readonly Variant[];
 }

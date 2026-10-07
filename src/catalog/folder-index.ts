@@ -46,6 +46,7 @@ export function mapIndex(map: MapNode, hasDerivedImage: DerivedImageAvailability
     kind: "map",
     name: map.name,
     path: map.path,
+    originalPath: map.sourcePath,
     cover: coverOf(map, hasDerivedImage),
     variants: map.variants.map((variant) => ({
       file: variant.name,

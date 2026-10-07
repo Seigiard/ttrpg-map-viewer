@@ -1,7 +1,14 @@
 import { Effect } from "effect";
 import { join } from "node:path";
 import { log } from "../logging/index.ts";
-import { isAnimatedVariant, type CategoryNode, classifyCollection, type FileListing, type MapNode } from "./classify.ts";
+import {
+  isAnimatedVariant,
+  type CategoryNode,
+  classifyCollection,
+  type FileListing,
+  type FolderListing,
+  type MapNode,
+} from "./classify.ts";
 import { selectMapCovers } from "./cover.ts";
 import { statPath, type FileSystemError, writeFileAtomically } from "./file-system.ts";
 import { categoryIndex, mapIndex, previewPath, thumbnailPath, type DerivedImageAvailability } from "./folder-index.ts";
@@ -39,6 +46,11 @@ interface DerivedImageJob {
   readonly variant: FileListing;
 }
 
+interface ZipArchive {
+  readonly path: string;
+  readonly size: number;
+}
+
 function updateCategoryCovers(category: CategoryNode, mapsByPath: ReadonlyMap<string, MapNode>): CategoryNode {
   return {
     ...category,
@@ -61,6 +73,23 @@ function collectNodes(root: CategoryNode): CatalogNodes {
   return { categories, maps };
 }
 
+function collectZipArchives(root: FolderListing): ZipArchive[] {
+  const archives: ZipArchive[] = [];
+  const pending = [root];
+
+  for (let folder = pending.pop(); folder; folder = pending.pop()) {
+    for (const file of folder.files) {
+      if (!file.name.toLowerCase().endsWith(".zip")) continue;
+
+      archives.push({ path: folder.path === "" ? file.name : `${folder.path}/${file.name}`, size: file.size });
+    }
+
+    pending.push(...folder.subfolders);
+  }
+
+  return archives.sort((a, b) => a.path.localeCompare(b.path, "en", { sensitivity: "base" }));
+}
+
 function indexFile(dataPath: string, path: CatalogPath): string {
   return join(dataPath, path, INDEX_FILE);
 }
@@ -80,13 +109,17 @@ function derivedImageKey(map: MapNode, variant: FileListing, kind: DerivedImageK
 export function generateCatalog(options: GenerationOptions): Effect.Effect<GenerationSummary, FileSystemError> {
   return Effect.gen(function* () {
     const listing = yield* scanCollection(options.filesPath);
-    const { root, mixedFolders } = classifyCollection(listing);
-
-    for (const path of mixedFolders) {
-      log.warn("Generate", "Folder has variants and subfolders; subfolders are not catalogued yet", { path });
-    }
+    const { root } = classifyCollection(listing);
 
     const { categories: unselectedCategories, maps: unselectedMaps } = collectNodes(root);
+    const zipArchives = collectZipArchives(listing);
+    const likelyDumps = unselectedMaps.filter((map) => map.variants.length > 60);
+
+    for (const archive of zipArchives) log.info("Generate", "ZIP archive ignored", { path: archive.path, size: archive.size });
+
+    for (const map of likelyDumps) log.warn("Generate", "Likely dump", { path: map.sourcePath, variants: map.variants.length });
+    log.info("Generate", "Collection diagnostics", { zipArchives: zipArchives.length, likelyDumps: likelyDumps.length });
+
     const maps = yield* selectMapCovers(unselectedMaps, options.filesPath, options.overridesPath);
     const mapsByPath = new Map(maps.map((map) => [map.path, map]));
     const categories = unselectedCategories.map((category) => updateCategoryCovers(category, mapsByPath));
@@ -137,7 +170,7 @@ export function generateCatalog(options: GenerationOptions): Effect.Effect<Gener
       jobs,
       ({ map, variant }) =>
         Effect.gen(function* () {
-          const original = join(options.filesPath, map.path, variant.name);
+          const original = join(options.filesPath, map.sourcePath, variant.name);
           const preview = join(options.dataPath, previewPath(map.path, variant.name));
           const thumbnail = join(options.dataPath, thumbnailPath(map.path, variant.name));
 

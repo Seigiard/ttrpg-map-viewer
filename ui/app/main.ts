@@ -117,7 +117,7 @@ function preview(index: MapIndex, variant: Variant): HTMLElement {
   if (variant.animated) {
     return element("video", {
       className: "preview",
-      src: originalUrl(index.path, variant.file),
+      src: originalUrl(index.originalPath, variant.file),
       poster: variant.preview === null ? "" : catalogFileUrl(variant.preview),
       muted: true,
       loop: true,
@@ -139,9 +139,9 @@ function renderMap(index: MapIndex): HTMLElement[] {
     element(
       "p",
       { className: "actions" },
-      element("a", { href: originalUrl(index.path, selected.file), target: "_blank", rel: "noreferrer" }, "Open original"),
+      element("a", { href: originalUrl(index.originalPath, selected.file), target: "_blank", rel: "noreferrer" }, "Open original"),
       " ",
-      element("a", { href: downloadUrl(index.path, selected.file) }, "Download"),
+      element("a", { href: downloadUrl(index.originalPath, selected.file) }, "Download"),
     ),
     element(
       "ul",
