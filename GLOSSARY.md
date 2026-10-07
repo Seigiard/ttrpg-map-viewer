@@ -26,10 +26,6 @@ _Avoid_: animation, video map
 A folder that groups maps and other categories rather than being a map itself.
 _Avoid_: collection, group, pack
 
-**Series**:
-A category whose images differ only by a running number and are each an independent single-variant map.
-_Avoid_: set, batch
-
 **Dump**:
 A folder holding many unrelated maps side by side, waiting to be sorted into one folder per map.
 _Avoid_: mess, flat folder
