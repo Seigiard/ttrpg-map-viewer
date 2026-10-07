@@ -13,6 +13,7 @@ import { selectMapCovers } from "./cover.ts";
 import { readDirectory, removePath, statPath, type FileSystemError, writeTextFileIfChanged } from "./file-system.ts";
 import { categoryIndex, mapIndex, previewPath, searchIndex, thumbnailPath, type DerivedImageAvailability } from "./folder-index.ts";
 import { type CatalogPath, type FolderIndex, INDEX_FILE, SEARCH_FILE } from "./model.ts";
+import { enrichMapMetadata, readVariantDimensions } from "./metadata.ts";
 import { scanCollection } from "./scan.ts";
 import { ensureDerivedImage, PREVIEW_MAX_SIZE, THUMBNAIL_MAX_SIZE, type DerivedImageKind } from "./thumbnail.ts";
 
@@ -180,7 +181,9 @@ export function generateCatalog(options: GenerationOptions): Effect.Effect<Gener
     for (const map of likelyDumps) log.warn("Generate", "Likely dump", { path: map.sourcePath, variants: map.variants.length });
     log.info("Generate", "Collection diagnostics", { zipArchives: zipArchives.length, likelyDumps: likelyDumps.length });
 
-    const maps = yield* selectMapCovers(unselectedMaps, options.filesPath, options.overridesPath);
+    const dimensions = yield* readVariantDimensions(unselectedMaps, options.filesPath);
+    const selectedMaps = yield* selectMapCovers(unselectedMaps, options.overridesPath, dimensions);
+    const maps = yield* enrichMapMetadata(selectedMaps, listing, options.filesPath, dimensions);
     const mapsByPath = new Map(maps.map((map) => [map.path, map]));
     const categories = unselectedCategories.map((category) => updateCategoryCovers(category, mapsByPath));
     const failedDerivedImages = new Set<string>();

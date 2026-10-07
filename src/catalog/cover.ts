@@ -1,10 +1,8 @@
 import { Effect } from "effect";
-import { join } from "node:path";
-import sharp from "sharp";
 import { log } from "../logging/index.ts";
-import { ownedPromise } from "../utils/owned-promise.ts";
 import { isAnimatedVariant, type FileListing, type MapNode } from "./classify.ts";
 import { readTextFile } from "./file-system.ts";
+import type { VariantDimensions } from "./metadata.ts";
 
 interface CoverOverrides {
   readonly covers: Readonly<Record<string, string>>;
@@ -43,14 +41,14 @@ function preferenceScore(name: string): number {
   return tokens.includes("night") ? preferred - 1_000 : preferred;
 }
 
-function pixelArea(path: string): Effect.Effect<number, never> {
-  return ownedPromise(
-    () => sharp(path).metadata(),
-    () => undefined,
-  ).pipe(
-    Effect.map((metadata) => (metadata.width ?? 0) * (metadata.height ?? 0)),
-    Effect.catch(() => Effect.succeed(0)),
-  );
+function variantKey(map: MapNode, variant: FileListing): string {
+  return `${map.sourcePath}\u0000${variant.name}`;
+}
+
+function pixelArea(map: MapNode, variant: FileListing, dimensions: VariantDimensions): number {
+  const image = dimensions.get(variantKey(map, variant));
+
+  return (image?.width ?? 0) * (image?.height ?? 0);
 }
 
 function parseOverrides(content: string, path: string): CoverOverrides {
@@ -81,14 +79,12 @@ function loadOverrides(path: string): Effect.Effect<CoverOverrides, never> {
   );
 }
 
-function selectCover(map: MapNode, filesPath: string): Effect.Effect<FileListing, never> {
+function selectCover(map: MapNode, dimensions: VariantDimensions): Effect.Effect<FileListing, never> {
   const stillVariants = map.variants.filter((variant) => !isAnimatedVariant(variant.name));
   const candidates = stillVariants.length > 0 ? stillVariants : map.variants;
 
   return Effect.forEach(candidates, (variant) =>
-    pixelArea(join(filesPath, map.sourcePath, variant.name)).pipe(
-      Effect.map((area): CoverCandidate => ({ variant, score: preferenceScore(variant.name), area })),
-    ),
+    Effect.succeed({ variant, score: preferenceScore(variant.name), area: pixelArea(map, variant, dimensions) } satisfies CoverCandidate),
   ).pipe(
     Effect.map(
       (scored) =>
@@ -102,8 +98,8 @@ function selectCover(map: MapNode, filesPath: string): Effect.Effect<FileListing
 /** Selects Covers after the Collection scan, including image metadata without decoding Originals. */
 export function selectMapCovers(
   maps: readonly MapNode[],
-  filesPath: string,
   overridesPath: string,
+  dimensions: VariantDimensions,
 ): Effect.Effect<readonly MapNode[], never> {
   return Effect.gen(function* () {
     const overrides = yield* loadOverrides(overridesPath);
@@ -124,7 +120,7 @@ export function selectMapCovers(
         log.warn("Generate", "Cover override references a missing variant", { path: map.path, variant: overriddenVariant });
       }
 
-      return selectCover(map, filesPath).pipe(Effect.map((cover) => ({ ...map, cover })));
+      return selectCover(map, dimensions).pipe(Effect.map((cover) => ({ ...map, cover })));
     });
   });
 }

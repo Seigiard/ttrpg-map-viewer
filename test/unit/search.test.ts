@@ -9,6 +9,8 @@ const maps: readonly SearchMap[] = [
     categoryPath: ["Czepeku", "Underground"],
     thumbnail: "Czepeku/Underground/Cavern Entrance/_thumbnails/Day.jpg.webp",
     variantCount: 2,
+    author: "Czepeku",
+    tags: ["Maps & Scenes"],
   },
   {
     name: "Village Square",
@@ -23,6 +25,17 @@ describe("filterSearchMaps", () => {
   test("finds Maps by name or Category path with case-insensitive, diacritics-insensitive AND terms", () => {
     // #given
     const query = "czepéku cavern";
+
+    // #when
+    const results = filterSearchMaps(maps, query);
+
+    // #then
+    expect(results).toEqual([maps[0]!]);
+  });
+
+  test("finds Maps by Author and tags", () => {
+    // #given
+    const query = "czepeku scenes";
 
     // #when
     const results = filterSearchMaps(maps, query);

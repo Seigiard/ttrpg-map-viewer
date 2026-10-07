@@ -8,6 +8,25 @@ export const SEARCH_FILE = "search.json";
 /** Paths are collection-relative, "/"-joined, without leading or trailing slash; the collection root is "". */
 export type CatalogPath = string;
 
+/** Map extent in grid cells. */
+export interface MapSize {
+  readonly width: number;
+  readonly height: number;
+}
+
+export interface MapMetadata {
+  readonly author?: string;
+  readonly tags?: readonly string[];
+  readonly mapSize?: MapSize;
+}
+
+export interface VariantMetadata {
+  /** Image pixels per grid cell. */
+  readonly gridScale?: number;
+  /** Present only when this Variant differs from its Map's map size. */
+  readonly mapSize?: MapSize;
+}
+
 export interface Cover {
   /** File name of the variant chosen as the cover. */
   readonly variant: string;
@@ -20,14 +39,14 @@ export interface CategoryCard {
   readonly path: CatalogPath;
 }
 
-export interface MapCard {
+export interface MapCard extends MapMetadata {
   readonly name: string;
   readonly path: CatalogPath;
   readonly variantCount: number;
   readonly cover: Cover;
 }
 
-export interface SearchMap {
+export interface SearchMap extends Pick<MapMetadata, "author" | "tags"> {
   readonly name: string;
   readonly path: CatalogPath;
   /** Names of the Categories that contain the Map, ordered from the collection root. */
@@ -41,7 +60,7 @@ export interface SearchIndex {
   readonly maps: readonly SearchMap[];
 }
 
-export interface Variant {
+export interface Variant extends VariantMetadata {
   /** File name in the map folder; the original lives at the map path plus this name. */
   readonly file: string;
   readonly size: number;
@@ -61,7 +80,7 @@ export interface CategoryIndex {
   readonly maps: readonly MapCard[];
 }
 
-export interface MapIndex {
+export interface MapIndex extends MapMetadata {
   readonly kind: "map";
   readonly name: string;
   readonly path: CatalogPath;

@@ -87,6 +87,26 @@ beforeAll(async () => {
   await image(join(pit, "Empty Day.jpg"), LARGE_WIDTH, LARGE_HEIGHT, "png");
   await video(join(pit, "Rain.webm"));
   await image(join(collection, "czepuku", "CZEPEKU Fantasy Maps", "Serene Lakeside", "BRIDGE DAY.webp"), TINY, TINY / 2, "webp");
+  await writeFile(
+    join(collection, "czepuku", "czepeku_data.json"),
+    JSON.stringify([
+      {
+        name: "Monster Fighting Pit",
+        type: "map",
+        cats: ["CZEPEKU Fantasy Maps", "Maps & Scenes"],
+        maps: [
+          { name: "EMPTY DAY", grid: "30x20@100" },
+          { name: "ORIGINAL NIGHT", grid: "30x20@100" },
+        ],
+      },
+      {
+        name: "Serene Lakeside",
+        type: "scene",
+        cats: ["CZEPEKU Fantasy Maps", "Maps & Scenes"],
+        maps: [{ name: "BRIDGE DAY", grid: "128x64@None" }],
+      },
+    ]),
+  );
   await image(join(collection, "Pack 09", "Ancient Ruins", "Ruins_BaseDayGL.png"), TINY, TINY, "png");
   await writeFile(join(collection, "Printable Maps.zip"), "not really a zip");
 });
@@ -141,6 +161,9 @@ describe("generateCatalog", () => {
             variant: "Empty Day.jpg",
             thumbnail: "czepuku/CZEPEKU Fantasy Maps/Monster Fighting Pit/_thumbnails/Empty Day.jpg.webp",
           },
+          author: "Czepeku",
+          tags: ["Maps & Scenes", "map"],
+          mapSize: { width: 30, height: 20 },
         },
         {
           name: "Serene Lakeside",
@@ -150,6 +173,8 @@ describe("generateCatalog", () => {
             variant: "BRIDGE DAY.webp",
             thumbnail: "czepuku/CZEPEKU Fantasy Maps/Serene Lakeside/_thumbnails/BRIDGE DAY.webp.webp",
           },
+          author: "Czepeku",
+          tags: ["Maps & Scenes", "scene"],
         },
       ],
     });
@@ -162,6 +187,8 @@ describe("generateCatalog", () => {
           categoryPath: ["czepuku", "CZEPEKU Fantasy Maps"],
           thumbnail: "czepuku/CZEPEKU Fantasy Maps/Monster Fighting Pit/_thumbnails/Empty Day.jpg.webp",
           variantCount: 3,
+          author: "Czepeku",
+          tags: ["Maps & Scenes", "map"],
         },
         {
           name: "Serene Lakeside",
@@ -169,6 +196,8 @@ describe("generateCatalog", () => {
           categoryPath: ["czepuku", "CZEPEKU Fantasy Maps"],
           thumbnail: "czepuku/CZEPEKU Fantasy Maps/Serene Lakeside/_thumbnails/BRIDGE DAY.webp.webp",
           variantCount: 1,
+          author: "Czepeku",
+          tags: ["Maps & Scenes", "scene"],
         },
         {
           name: "Ancient Ruins",
@@ -183,24 +212,30 @@ describe("generateCatalog", () => {
     const map = await readJson<MapIndex>(join(output, "czepuku", "CZEPEKU Fantasy Maps", "Monster Fighting Pit", "index.json"));
     expect(map.kind).toBe("map");
     expect(map.cover.variant).toBe("Empty Day.jpg");
-    expect(map.variants.map(({ file, animated, thumbnail, preview }) => ({ file, animated, thumbnail, preview }))).toEqual([
+    expect(map).toMatchObject({ author: "Czepeku", tags: ["Maps & Scenes", "map"], mapSize: { width: 30, height: 20 } });
+    expect(
+      map.variants.map(({ file, animated, thumbnail, preview, gridScale }) => ({ file, animated, thumbnail, preview, gridScale })),
+    ).toEqual([
       {
         file: "Empty Day.jpg",
         animated: false,
         thumbnail: "czepuku/CZEPEKU Fantasy Maps/Monster Fighting Pit/_thumbnails/Empty Day.jpg.webp",
         preview: "czepuku/CZEPEKU Fantasy Maps/Monster Fighting Pit/_previews/Empty Day.jpg.webp",
+        gridScale: 100,
       },
       {
         file: "Original Night.jpg",
         animated: false,
         thumbnail: "czepuku/CZEPEKU Fantasy Maps/Monster Fighting Pit/_thumbnails/Original Night.jpg.webp",
         preview: "czepuku/CZEPEKU Fantasy Maps/Monster Fighting Pit/_previews/Original Night.jpg.webp",
+        gridScale: 100,
       },
       {
         file: "Rain.webm",
         animated: true,
         thumbnail: "czepuku/CZEPEKU Fantasy Maps/Monster Fighting Pit/_thumbnails/Rain.webm.webp",
         preview: "czepuku/CZEPEKU Fantasy Maps/Monster Fighting Pit/_previews/Rain.webm.webp",
+        gridScale: undefined,
       },
     ]);
   });
@@ -505,6 +540,50 @@ describe("generateCatalog", () => {
     // #then
     expect(summary.previewsCreated).toBe(1);
     expect((await sharp(preview).metadata()).format).toBe("webp");
+  });
+
+  test("enriches DnDavid names and Dungeondraft exports without adding metadata to unrelated Maps", async () => {
+    // #given
+    await image(join(collection, "DnDavid", "Village Square", "Village Square Grid [40x30] (DnDavid).jpg"), 4_001, 3_000, "jpeg");
+    await image(join(collection, "Pack 09", "Achlys Manor", "1stFloor Day.png"), TINY, TINY, "png");
+    await image(join(collection, "Pack 09", "Achlys Manor", "Basement Day.png"), TINY, TINY, "png");
+    await writeFile(
+      join(collection, "Pack 09", "Achlys Manor", "1stFloorVTT.dd2vtt"),
+      JSON.stringify({ resolution: { map_size: { x: 55, y: 65 }, pixels_per_grid: 140 } }),
+    );
+
+    // #when
+    await generate();
+
+    const [dnDavid, achlys, unrelated] = await Promise.all([
+      readJson<MapIndex>(join(output, "DnDavid", "Village Square", "index.json")),
+      readJson<MapIndex>(join(output, "Pack 09", "Achlys Manor", "index.json")),
+      readJson<MapIndex>(join(output, "Pack 09", "Ancient Ruins", "index.json")),
+    ]);
+
+    // #then
+    expect(dnDavid).toMatchObject({ author: "DnDavid", mapSize: { width: 40, height: 30 } });
+    expect(dnDavid.variants[0]).toMatchObject({ gridScale: 100.025 });
+    expect(achlys.variants).toEqual([
+      expect.objectContaining({ file: "1stFloor Day.png", gridScale: 140, mapSize: { width: 55, height: 65 } }),
+      expect.objectContaining({ file: "Basement Day.png" }),
+    ]);
+    expect(unrelated).toEqual({
+      kind: "map",
+      name: "Ancient Ruins",
+      path: "Pack 09/Ancient Ruins",
+      originalPath: "Pack 09/Ancient Ruins",
+      cover: { variant: "Ruins_BaseDayGL.png", thumbnail: "Pack 09/Ancient Ruins/_thumbnails/Ruins_BaseDayGL.png.webp" },
+      variants: [
+        {
+          file: "Ruins_BaseDayGL.png",
+          size: expect.any(Number),
+          animated: false,
+          thumbnail: "Pack 09/Ancient Ruins/_thumbnails/Ruins_BaseDayGL.png.webp",
+          preview: "Pack 09/Ancient Ruins/_previews/Ruins_BaseDayGL.png.webp",
+        },
+      ],
+    });
   });
 });
 

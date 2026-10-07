@@ -1,4 +1,4 @@
-import type { CatalogPath } from "./model.ts";
+import type { CatalogPath, MapMetadata, VariantMetadata } from "./model.ts";
 
 const VARIANT_EXTENSIONS: ReadonlySet<string> = new Set(["webp", "jpg", "jpeg", "png", "webm", "mp4"]);
 
@@ -11,6 +11,7 @@ export interface FileListing {
   readonly name: string;
   readonly size: number;
   readonly mtimeMs: number;
+  readonly metadata?: VariantMetadata;
 }
 
 /** One folder of the collection as found on disk, before any domain meaning is given to it. */
@@ -30,6 +31,7 @@ export interface MapNode {
   /** Sorted by name; never empty. */
   readonly variants: readonly [FileListing, ...FileListing[]];
   readonly cover: FileListing;
+  readonly metadata?: MapMetadata;
 }
 
 export interface CategoryNode {

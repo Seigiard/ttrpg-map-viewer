@@ -1,4 +1,14 @@
-import type { CatalogPath, CategoryIndex, Cover, FolderIndex, MapIndex, SearchIndex, SearchMap, Variant } from "../../src/catalog/model.ts";
+import type {
+  CatalogPath,
+  CategoryIndex,
+  Cover,
+  FolderIndex,
+  MapIndex,
+  MapMetadata,
+  SearchIndex,
+  SearchMap,
+  Variant,
+} from "../../src/catalog/model.ts";
 import { filterSearchMaps } from "./search.ts";
 import { catalogFileUrl, downloadUrl, folderUrl, indexUrl, originalUrl, pathFromLocation, searchIndexUrl } from "./urls.ts";
 
@@ -32,6 +42,16 @@ function stripExtension(file: string): string {
   const dot = file.lastIndexOf(".");
 
   return dot > 0 ? file.slice(0, dot) : file;
+}
+
+function metadataBadges(metadata: Pick<MapMetadata, "author" | "mapSize">): HTMLElement | undefined {
+  const labels = [metadata.mapSize ? `${metadata.mapSize.width}x${metadata.mapSize.height}` : undefined, metadata.author].filter(
+    (label): label is string => label !== undefined,
+  );
+
+  return labels.length === 0
+    ? undefined
+    : element("span", { className: "badges" }, ...labels.map((label) => element("span", { className: "badge" }, label)));
 }
 
 function breadcrumbs(path: CatalogPath): HTMLElement {
@@ -93,8 +113,10 @@ function searchHeader(): HTMLElement {
 
   const renderResults = (maps: readonly SearchMap[]) => {
     results.replaceChildren(
-      ...maps.map((map) =>
-        element(
+      ...maps.map((map) => {
+        const badges = metadataBadges(map);
+
+        return element(
           "li",
           {},
           navLink(
@@ -102,10 +124,11 @@ function searchHeader(): HTMLElement {
             searchThumbnail(map),
             element("span", { className: "name" }, map.name),
             element("span", { className: "search-context" }, map.categoryPath.join(" / ")),
+            ...(badges ? [badges] : []),
             element("span", { className: "count" }, `${map.variantCount} variant${map.variantCount === 1 ? "" : "s"}`),
           ),
-        ),
-      ),
+        );
+      }),
     );
   };
 
@@ -156,18 +179,21 @@ function renderCategory(index: CategoryIndex): HTMLElement[] {
       element(
         "ul",
         { className: "maps" },
-        ...index.maps.map((map) =>
-          element(
+        ...index.maps.map((map) => {
+          const badges = metadataBadges(map);
+
+          return element(
             "li",
             {},
             navLink(
               map.path,
               thumbnail(map.cover, map.name),
               element("span", { className: "name" }, map.name),
+              ...(badges ? [badges] : []),
               element("span", { className: "count" }, `${map.variantCount} variant${map.variantCount === 1 ? "" : "s"}`),
             ),
-          ),
-        ),
+          );
+        }),
       ),
     );
   }
@@ -221,9 +247,14 @@ function preview(index: MapIndex, variant: Variant): HTMLElement {
 
 function renderMap(index: MapIndex): HTMLElement[] {
   const selected = selectedVariant(index);
+  const badges = metadataBadges(index);
 
   return [
     preview(index, selected),
+    ...(badges ? [badges] : []),
+    ...(index.tags?.length
+      ? [element("p", { className: "tags" }, ...index.tags.map((tag) => element("span", { className: "tag" }, tag)))]
+      : []),
     element(
       "p",
       { className: "actions" },

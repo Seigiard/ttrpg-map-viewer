@@ -37,6 +37,7 @@ export function categoryIndex(category: CategoryNode, hasDerivedImage: DerivedIm
       path: map.path,
       variantCount: map.variants.length,
       cover: coverOf(map, hasDerivedImage),
+      ...map.metadata,
     })),
   };
 }
@@ -48,12 +49,14 @@ export function mapIndex(map: MapNode, hasDerivedImage: DerivedImageAvailability
     path: map.path,
     originalPath: map.sourcePath,
     cover: coverOf(map, hasDerivedImage),
+    ...map.metadata,
     variants: map.variants.map((variant) => ({
       file: variant.name,
       size: variant.size,
       animated: isAnimatedVariant(variant.name),
       thumbnail: hasDerivedImage(map, variant, "thumbnail") ? thumbnailPath(map.path, variant.name) : null,
       preview: hasDerivedImage(map, variant, "preview") ? previewPath(map.path, variant.name) : null,
+      ...variant.metadata,
     })),
   };
 }
@@ -67,6 +70,8 @@ export function searchIndex(maps: readonly MapNode[], hasDerivedImage: DerivedIm
         categoryPath: map.path.split("/").slice(0, -1),
         thumbnail: hasDerivedImage(map, map.cover, "thumbnail") ? thumbnailPath(map.path, map.cover.name) : null,
         variantCount: map.variants.length,
+        author: map.metadata?.author,
+        tags: map.metadata?.tags,
       }))
       .sort((a, b) => a.path.localeCompare(b.path, "en", { sensitivity: "base" })),
   };

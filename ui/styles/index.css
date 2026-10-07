@@ -149,6 +149,22 @@ ul {
   overflow-wrap: anywhere;
 }
 
+.badges,
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+}
+
+.badge,
+.tag {
+  padding: 1px 5px;
+  border: 1px solid GrayText;
+  border-radius: 3px;
+  font-size: 0.85em;
+}
+
 .count,
 .notice {
   color: GrayText;
