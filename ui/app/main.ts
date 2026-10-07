@@ -1,5 +1,6 @@
-import type { CatalogPath, CategoryIndex, Cover, FolderIndex, MapIndex, Variant } from "../../src/catalog/model.ts";
-import { catalogFileUrl, downloadUrl, folderUrl, indexUrl, originalUrl, pathFromLocation } from "./urls.ts";
+import type { CatalogPath, CategoryIndex, Cover, FolderIndex, MapIndex, SearchIndex, SearchMap, Variant } from "../../src/catalog/model.ts";
+import { filterSearchMaps } from "./search.ts";
+import { catalogFileUrl, downloadUrl, folderUrl, indexUrl, originalUrl, pathFromLocation, searchIndexUrl } from "./urls.ts";
 
 const ROOT_TITLE = "Catalog";
 
@@ -48,6 +49,93 @@ function thumbnail(cover: Cover, alt: string): HTMLElement {
   if (cover.thumbnail === null) return element("div", { className: "thumb thumb-missing" }, "no thumbnail");
 
   return element("img", { className: "thumb", src: catalogFileUrl(cover.thumbnail), alt, loading: "lazy", decoding: "async" });
+}
+
+function searchThumbnail(map: SearchMap): HTMLElement {
+  if (map.thumbnail === null) return element("div", { className: "search-thumb thumb-missing" }, "no thumbnail");
+
+  return element("img", { className: "search-thumb", src: catalogFileUrl(map.thumbnail), alt: "", loading: "lazy", decoding: "async" });
+}
+
+function searchQuery(): string {
+  return new URLSearchParams(location.search).get("q") ?? "";
+}
+
+function setSearchQuery(query: string): void {
+  const url = new URL(location.href);
+
+  if (query === "") url.searchParams.delete("q");
+  else url.searchParams.set("q", query);
+  history.replaceState(null, "", url);
+}
+
+async function loadSearchIndex(): Promise<SearchIndex | null> {
+  const response = await fetch(searchIndexUrl(), { cache: "no-cache" });
+
+  if (!response.ok) return null;
+
+  // SAFETY: search.json is written only by the generator against the SearchIndex contract in src/catalog/model.ts.
+  return (await response.json()) as SearchIndex;
+}
+
+function searchHeader(): HTMLElement {
+  const input = element("input", {
+    className: "search-input",
+    type: "search",
+    placeholder: "Search maps",
+    value: searchQuery(),
+  });
+
+  input.setAttribute("aria-label", "Search maps");
+  const results = element("ul", { className: "search-results" });
+  let index: SearchIndex | null | undefined;
+  let loading: Promise<SearchIndex | null> | undefined;
+
+  const renderResults = (maps: readonly SearchMap[]) => {
+    results.replaceChildren(
+      ...maps.map((map) =>
+        element(
+          "li",
+          {},
+          navLink(
+            map.path,
+            searchThumbnail(map),
+            element("span", { className: "name" }, map.name),
+            element("span", { className: "search-context" }, map.categoryPath.join(" / ")),
+            element("span", { className: "count" }, `${map.variantCount} variant${map.variantCount === 1 ? "" : "s"}`),
+          ),
+        ),
+      ),
+    );
+  };
+
+  const load = async () => {
+    loading ??= loadSearchIndex();
+    index = await loading;
+  };
+
+  const search = async () => {
+    const query = input.value;
+    setSearchQuery(query);
+
+    if (query.trim() === "") {
+      results.replaceChildren();
+
+      return;
+    }
+
+    await load();
+
+    if (input.value !== query) return;
+    renderResults(index === null ? [] : filterSearchMaps(index?.maps ?? [], query));
+  };
+
+  input.addEventListener("focus", () => void load());
+  input.addEventListener("input", () => void search());
+
+  if (input.value !== "") void search();
+
+  return element("header", { className: "header" }, input, results);
 }
 
 function renderCategory(index: CategoryIndex): HTMLElement[] {
@@ -183,7 +271,7 @@ async function render(): Promise<void> {
       load.status === 404 && path === "" ? "The catalog is being generated. Reload in a moment." : `Not found (${load.status}).`;
 
     document.title = ROOT_TITLE;
-    app.replaceChildren(breadcrumbs(path), element("p", { className: "notice" }, message));
+    app.replaceChildren(searchHeader(), breadcrumbs(path), element("p", { className: "notice" }, message));
 
     return;
   }
@@ -192,6 +280,7 @@ async function render(): Promise<void> {
   document.title = path === "" ? ROOT_TITLE : `${index.name} · ${ROOT_TITLE}`;
 
   app.replaceChildren(
+    searchHeader(),
     breadcrumbs(path),
     element("h1", {}, displayName(index.name)),
     ...(index.kind === "category" ? renderCategory(index) : renderMap(index)),

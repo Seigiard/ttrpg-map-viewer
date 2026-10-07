@@ -7,7 +7,7 @@ import { join } from "node:path";
 import sharp from "sharp";
 import { generateCatalog, type GenerationSummary } from "../../src/catalog/generate.ts";
 import { RegenerationController } from "../../src/catalog/regeneration.ts";
-import type { CategoryIndex, MapIndex } from "../../src/catalog/model.ts";
+import type { CategoryIndex, MapIndex, SearchIndex } from "../../src/catalog/model.ts";
 
 const TINY = 64;
 
@@ -154,6 +154,32 @@ describe("generateCatalog", () => {
       ],
     });
 
+    expect(await readJson<SearchIndex>(join(output, "search.json"))).toEqual({
+      maps: [
+        {
+          name: "Monster Fighting Pit",
+          path: "czepuku/CZEPEKU Fantasy Maps/Monster Fighting Pit",
+          categoryPath: ["czepuku", "CZEPEKU Fantasy Maps"],
+          thumbnail: "czepuku/CZEPEKU Fantasy Maps/Monster Fighting Pit/_thumbnails/Empty Day.jpg.webp",
+          variantCount: 3,
+        },
+        {
+          name: "Serene Lakeside",
+          path: "czepuku/CZEPEKU Fantasy Maps/Serene Lakeside",
+          categoryPath: ["czepuku", "CZEPEKU Fantasy Maps"],
+          thumbnail: "czepuku/CZEPEKU Fantasy Maps/Serene Lakeside/_thumbnails/BRIDGE DAY.webp.webp",
+          variantCount: 1,
+        },
+        {
+          name: "Ancient Ruins",
+          path: "Pack 09/Ancient Ruins",
+          categoryPath: ["Pack 09"],
+          thumbnail: "Pack 09/Ancient Ruins/_thumbnails/Ruins_BaseDayGL.png.webp",
+          variantCount: 1,
+        },
+      ],
+    });
+
     const map = await readJson<MapIndex>(join(output, "czepuku", "CZEPEKU Fantasy Maps", "Monster Fighting Pit", "index.json"));
     expect(map.kind).toBe("map");
     expect(map.cover.variant).toBe("Empty Day.jpg");
@@ -215,10 +241,12 @@ describe("generateCatalog", () => {
     // #given
     const thumb = join(output, "Pack 09", "Ancient Ruins", "_thumbnails", "Ruins_BaseDayGL.png.webp");
     const index = join(output, "Pack 09", "Ancient Ruins", "index.json");
+    const search = join(output, "search.json");
 
-    const [thumbnailMtimeBefore, indexMtimeBefore] = await Promise.all([
+    const [thumbnailMtimeBefore, indexMtimeBefore, searchMtimeBefore] = await Promise.all([
       stat(thumb).then(({ mtimeMs }) => mtimeMs),
       stat(index).then(({ mtimeMs }) => mtimeMs),
+      stat(search).then(({ mtimeMs }) => mtimeMs),
     ]);
 
     // #when
@@ -235,10 +263,13 @@ describe("generateCatalog", () => {
       previewsFresh: 5,
       previewsFailed: 0,
     });
-    expect(await Promise.all([stat(thumb).then(({ mtimeMs }) => mtimeMs), stat(index).then(({ mtimeMs }) => mtimeMs)])).toEqual([
-      thumbnailMtimeBefore,
-      indexMtimeBefore,
-    ]);
+    expect(
+      await Promise.all([
+        stat(thumb).then(({ mtimeMs }) => mtimeMs),
+        stat(index).then(({ mtimeMs }) => mtimeMs),
+        stat(search).then(({ mtimeMs }) => mtimeMs),
+      ]),
+    ).toEqual([thumbnailMtimeBefore, indexMtimeBefore, searchMtimeBefore]);
   });
 
   test("rebuilds a missing thumbnail from its fresh preview without decoding the original", async () => {

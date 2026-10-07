@@ -11,8 +11,8 @@ import {
 } from "./classify.ts";
 import { selectMapCovers } from "./cover.ts";
 import { readDirectory, removePath, statPath, type FileSystemError, writeTextFileIfChanged } from "./file-system.ts";
-import { categoryIndex, mapIndex, previewPath, thumbnailPath, type DerivedImageAvailability } from "./folder-index.ts";
-import { type CatalogPath, type FolderIndex, INDEX_FILE } from "./model.ts";
+import { categoryIndex, mapIndex, previewPath, searchIndex, thumbnailPath, type DerivedImageAvailability } from "./folder-index.ts";
+import { type CatalogPath, type FolderIndex, INDEX_FILE, SEARCH_FILE } from "./model.ts";
 import { scanCollection } from "./scan.ts";
 import { ensureDerivedImage, PREVIEW_MAX_SIZE, THUMBNAIL_MAX_SIZE, type DerivedImageKind } from "./thumbnail.ts";
 
@@ -98,6 +98,10 @@ function writeIndex(dataPath: string, index: FolderIndex): Effect.Effect<void, F
   return writeTextFileIfChanged(indexFile(dataPath, index.path), JSON.stringify(index));
 }
 
+function writeSearchIndex(dataPath: string, content: string): Effect.Effect<void, FileSystemError> {
+  return writeTextFileIfChanged(join(dataPath, SEARCH_FILE), content);
+}
+
 interface OutputManifest {
   readonly paths: ReadonlySet<string>;
   readonly directories: ReadonlySet<string>;
@@ -105,6 +109,7 @@ interface OutputManifest {
 
 function expectedOutputManifest(categories: readonly CategoryNode[], maps: readonly MapNode[]): OutputManifest {
   const paths = new Set([
+    SEARCH_FILE,
     ...categories.map((category) => join(category.path, INDEX_FILE)),
     ...maps.flatMap((map) => [
       join(map.path, INDEX_FILE),
@@ -158,7 +163,7 @@ function derivedImageKey(map: MapNode, variant: FileListing, kind: DerivedImageK
 }
 
 /**
- * Full one-shot generation: scan the collection, write one index.json per category and map, then make cover thumbnails.
+ * Full one-shot generation: scan the collection, write folder indexes and global search data, then make derived images.
  * Nothing is ever written under `filesPath`.
  */
 export function generateCatalog(options: GenerationOptions): Effect.Effect<GenerationSummary, FileSystemError> {
@@ -272,6 +277,8 @@ export function generateCatalog(options: GenerationOptions): Effect.Effect<Gener
     );
 
     if (failedDerivedImages.size > 0) yield* writeAllIndexes();
+
+    yield* writeSearchIndex(options.dataPath, JSON.stringify(searchIndex(maps, hasDerivedImage)));
 
     // An empty scan usually means the collection's mount is missing; pruning then would throw away hours of derived images.
     if (maps.length === 0) log.warn("Generate", "Collection has no maps; keeping existing catalog output", { files: options.filesPath });

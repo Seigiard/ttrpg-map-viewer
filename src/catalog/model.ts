@@ -2,6 +2,9 @@
 
 export const INDEX_FILE = "index.json";
 
+/** Global, compact data for client-side Map search. */
+export const SEARCH_FILE = "search.json";
+
 /** Paths are collection-relative, "/"-joined, without leading or trailing slash; the collection root is "". */
 export type CatalogPath = string;
 
@@ -22,6 +25,20 @@ export interface MapCard {
   readonly path: CatalogPath;
   readonly variantCount: number;
   readonly cover: Cover;
+}
+
+export interface SearchMap {
+  readonly name: string;
+  readonly path: CatalogPath;
+  /** Names of the Categories that contain the Map, ordered from the collection root. */
+  readonly categoryPath: readonly string[];
+  /** Output-tree-relative path of the Cover Thumbnail; null when it could not be made. */
+  readonly thumbnail: CatalogPath | null;
+  readonly variantCount: number;
+}
+
+export interface SearchIndex {
+  readonly maps: readonly SearchMap[];
 }
 
 export interface Variant {

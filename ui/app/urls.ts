@@ -23,6 +23,10 @@ export function catalogFileUrl(path: CatalogPath): string {
   return `${CATALOG_PREFIX}/${encodePath(path)}`;
 }
 
+export function searchIndexUrl(): string {
+  return `${CATALOG_PREFIX}/search.json`;
+}
+
 export function originalUrl(mapPath: CatalogPath, file: string): string {
   return `${ORIGINAL_PREFIX}/${encodePath(mapPath)}/${encodeURIComponent(file)}`;
 }

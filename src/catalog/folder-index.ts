@@ -1,5 +1,5 @@
 import { isAnimatedVariant, type CategoryNode, type FileListing, type MapNode } from "./classify.ts";
-import type { CatalogPath, CategoryIndex, Cover, MapIndex } from "./model.ts";
+import type { CatalogPath, CategoryIndex, Cover, MapIndex, SearchIndex } from "./model.ts";
 
 /** Leading underscore keeps derived files apart from mirrored folder names, which come from the collection. */
 const THUMBNAIL_DIR = "_thumbnails";
@@ -55,5 +55,19 @@ export function mapIndex(map: MapNode, hasDerivedImage: DerivedImageAvailability
       thumbnail: hasDerivedImage(map, variant, "thumbnail") ? thumbnailPath(map.path, variant.name) : null,
       preview: hasDerivedImage(map, variant, "preview") ? previewPath(map.path, variant.name) : null,
     })),
+  };
+}
+
+export function searchIndex(maps: readonly MapNode[], hasDerivedImage: DerivedImageAvailability): SearchIndex {
+  return {
+    maps: maps
+      .map((map) => ({
+        name: map.name,
+        path: map.path,
+        categoryPath: map.path.split("/").slice(0, -1),
+        thumbnail: hasDerivedImage(map, map.cover, "thumbnail") ? thumbnailPath(map.path, map.cover.name) : null,
+        variantCount: map.variants.length,
+      }))
+      .sort((a, b) => a.path.localeCompare(b.path, "en", { sensitivity: "base" })),
   };
 }
