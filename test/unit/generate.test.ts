@@ -58,8 +58,8 @@ async function snapshot(dir: string): Promise<string[]> {
   return lines.sort();
 }
 
-function generate(): Promise<GenerationSummary> {
-  return Effect.runPromise(generateCatalog({ filesPath: collection, dataPath: output, thumbnailConcurrency: 2 }));
+function generate(overridesPath = join(workDir, "no-overrides.json")): Promise<GenerationSummary> {
+  return Effect.runPromise(generateCatalog({ filesPath: collection, dataPath: output, overridesPath, thumbnailConcurrency: 2 }));
 }
 
 beforeAll(async () => {
@@ -252,7 +252,7 @@ describe("generateCatalog", () => {
   test("a cover that cannot be decoded gets a null thumbnail instead of failing the catalog", async () => {
     // #given
     await image(join(collection, "Broken", "Map", "keep.jpg"), TINY, TINY, "jpeg");
-    await writeFile(join(collection, "Broken", "Map", "a-broken.png"), "not an image");
+    await writeFile(join(collection, "Broken", "Map", "ORIGINAL.png"), "not an image");
 
     // #when
     const summary = await generate();
@@ -269,6 +269,37 @@ describe("generateCatalog", () => {
       previewsFresh: 5,
       previewsFailed: 1,
     });
-    expect(map.cover).toEqual({ variant: "a-broken.png", thumbnail: null });
+    expect(map.cover).toEqual({ variant: "ORIGINAL.png", thumbnail: null });
+  });
+
+  test("chooses a preferred still variant and applies a cover override on regeneration", async () => {
+    // #given
+    const czepeku = join(collection, "Cover selection", "Czepeku");
+    const pack = join(collection, "Cover selection", "Pack");
+    const overridden = join(collection, "Cover selection", "Overridden");
+    const overridesPath = join(workDir, "overrides.json");
+    await image(join(czepeku, "ORIGINAL DAY.webp"), TINY, TINY, "webp");
+    await image(join(czepeku, "BIG NEST EGGS DAY.webp"), LARGE_WIDTH, LARGE_HEIGHT, "webp");
+    await image(join(pack, "Ruins_BaseDayGL.png"), TINY, TINY, "png");
+    await image(join(pack, "Ruins_BaseNightGrid.png"), LARGE_WIDTH, LARGE_HEIGHT, "png");
+    await image(join(overridden, "Day.jpg"), TINY, TINY, "jpeg");
+    await image(join(overridden, "Night.jpg"), LARGE_WIDTH, LARGE_HEIGHT, "jpeg");
+
+    // #when
+    await generate();
+
+    const [czepekuIndex, packIndex] = await Promise.all([
+      readJson<MapIndex>(join(output, "Cover selection", "Czepeku", "index.json")),
+      readJson<MapIndex>(join(output, "Cover selection", "Pack", "index.json")),
+    ]);
+
+    await writeFile(overridesPath, JSON.stringify({ covers: { "Cover selection/Overridden": "Night.jpg" } }));
+    await generate(overridesPath);
+    const overriddenIndex = await readJson<MapIndex>(join(output, "Cover selection", "Overridden", "index.json"));
+
+    // #then
+    expect(czepekuIndex.cover.variant).toBe("ORIGINAL DAY.webp");
+    expect(packIndex.cover.variant).toBe("Ruins_BaseDayGL.png");
+    expect(overriddenIndex.cover.variant).toBe("Night.jpg");
   });
 });

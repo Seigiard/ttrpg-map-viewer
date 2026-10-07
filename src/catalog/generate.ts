@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { join } from "node:path";
 import { log } from "../logging/index.ts";
 import { isAnimatedVariant, type CategoryNode, classifyCollection, type FileListing, type MapNode } from "./classify.ts";
+import { selectMapCovers } from "./cover.ts";
 import { statPath, type FileSystemError, writeFileAtomically } from "./file-system.ts";
 import { categoryIndex, mapIndex, previewPath, thumbnailPath, type DerivedImageAvailability } from "./folder-index.ts";
 import { type CatalogPath, type FolderIndex, INDEX_FILE } from "./model.ts";
@@ -11,6 +12,7 @@ import { ensureDerivedImage, PREVIEW_MAX_SIZE, THUMBNAIL_MAX_SIZE, type DerivedI
 export interface GenerationOptions {
   readonly filesPath: string;
   readonly dataPath: string;
+  readonly overridesPath: string;
   readonly thumbnailConcurrency: number;
 }
 
@@ -35,6 +37,14 @@ interface CatalogNodes {
 interface DerivedImageJob {
   readonly map: MapNode;
   readonly variant: FileListing;
+}
+
+function updateCategoryCovers(category: CategoryNode, mapsByPath: ReadonlyMap<string, MapNode>): CategoryNode {
+  return {
+    ...category,
+    categories: category.categories.map((child) => updateCategoryCovers(child, mapsByPath)),
+    maps: category.maps.map((map) => mapsByPath.get(map.path) ?? map),
+  };
 }
 
 function collectNodes(root: CategoryNode): CatalogNodes {
@@ -76,7 +86,10 @@ export function generateCatalog(options: GenerationOptions): Effect.Effect<Gener
       log.warn("Generate", "Folder has variants and subfolders; subfolders are not catalogued yet", { path });
     }
 
-    const { categories, maps } = collectNodes(root);
+    const { categories: unselectedCategories, maps: unselectedMaps } = collectNodes(root);
+    const maps = yield* selectMapCovers(unselectedMaps, options.filesPath, options.overridesPath);
+    const mapsByPath = new Map(maps.map((map) => [map.path, map]));
+    const categories = unselectedCategories.map((category) => updateCategoryCovers(category, mapsByPath));
     const failedDerivedImages = new Set<string>();
     const hasDerivedImage: DerivedImageAvailability = (map, variant, kind) => !failedDerivedImages.has(derivedImageKey(map, variant, kind));
 

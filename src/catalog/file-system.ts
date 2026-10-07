@@ -1,6 +1,6 @@
 import { Data, Effect } from "effect";
 import type { Dirent, Stats } from "node:fs";
-import { mkdir, readdir, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { ownedPromise } from "../utils/owned-promise.ts";
 
@@ -33,6 +33,10 @@ function fsEffect<A>(operation: string, path: string, run: () => Promise<A>): Ef
 
 export function readDirectory(path: string): Effect.Effect<Dirent[], FileSystemError> {
   return fsEffect("readdir", path, () => readdir(path, { withFileTypes: true }));
+}
+
+export function readTextFile(path: string): Effect.Effect<string, FileSystemError> {
+  return fsEffect("readFile", path, () => readFile(path, "utf8"));
 }
 
 export function statPath(path: string): Effect.Effect<Stats, FileSystemError> {

@@ -7,7 +7,7 @@ Plan: GitHub issue #1 (spec) and its sub-issues. Each item is done when its issu
 Review base: d57ec6f0d430e4fe0f6b384cfd059ba6c308edeb
 
 - [x] #4 · map page: preview, variants, original, download, animated variants
-- [ ] #6 · cover selection heuristic and overrides
+- [x] #6 · cover selection heuristic and overrides
 - [ ] #7 · mixed folders and zip/dump diagnostics
 - [ ] #5 · incremental regeneration: watcher, mtime, orphans, reconcile
 - [ ] #8 · search
