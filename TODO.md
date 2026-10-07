@@ -9,7 +9,7 @@ Review base: d57ec6f0d430e4fe0f6b384cfd059ba6c308edeb
 - [x] #4 · map page: preview, variants, original, download, animated variants
 - [x] #6 · cover selection heuristic and overrides
 - [x] #7 · mixed folders and zip/dump diagnostics
-- [ ] #5 · incremental regeneration: watcher, mtime, orphans, reconcile
+- [x] #5 · incremental regeneration: watcher, mtime, orphans, reconcile
 - [ ] #8 · search
 - [ ] #9 · metadata enrichers and badges
 - [ ] #10 · download a whole map as a streamed zip

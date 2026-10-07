@@ -1,5 +1,5 @@
 FROM oven/bun:1-alpine AS base
-RUN apk add --no-cache ffmpeg nginx
+RUN apk add --no-cache ffmpeg inotify-tools nginx
 WORKDIR /app
 
 FROM base AS development
@@ -18,7 +18,7 @@ RUN bun install --frozen-lockfile --production
 COPY src ./src
 COPY --from=ui /app/static ./static
 COPY nginx.conf.template entrypoint.sh ./
-RUN chmod +x /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh /app/src/watcher.sh
 
 ENV FILES=/maps
 ENV DATA=/data

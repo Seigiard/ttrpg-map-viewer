@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
 import { generateCatalog, type GenerationSummary } from "../../src/catalog/generate.ts";
+import { RegenerationController } from "../../src/catalog/regeneration.ts";
 import type { CategoryIndex, MapIndex } from "../../src/catalog/model.ts";
 
 const TINY = 64;
@@ -213,7 +214,12 @@ describe("generateCatalog", () => {
   test("a second run reuses thumbnails that are newer than their originals", async () => {
     // #given
     const thumb = join(output, "Pack 09", "Ancient Ruins", "_thumbnails", "Ruins_BaseDayGL.png.webp");
-    const mtimeBefore = (await stat(thumb)).mtimeMs;
+    const index = join(output, "Pack 09", "Ancient Ruins", "index.json");
+
+    const [thumbnailMtimeBefore, indexMtimeBefore] = await Promise.all([
+      stat(thumb).then(({ mtimeMs }) => mtimeMs),
+      stat(index).then(({ mtimeMs }) => mtimeMs),
+    ]);
 
     // #when
     const summary = await generate();
@@ -229,25 +235,19 @@ describe("generateCatalog", () => {
       previewsFresh: 5,
       previewsFailed: 0,
     });
-    expect((await stat(thumb)).mtimeMs).toBe(mtimeBefore);
+    expect(await Promise.all([stat(thumb).then(({ mtimeMs }) => mtimeMs), stat(index).then(({ mtimeMs }) => mtimeMs)])).toEqual([
+      thumbnailMtimeBefore,
+      indexMtimeBefore,
+    ]);
   });
 
-  test("rebuilds a stale thumbnail from its fresh preview without decoding the original", async () => {
+  test("rebuilds a missing thumbnail from its fresh preview without decoding the original", async () => {
     // #given
-    const mapPath = join(collection, "czepuku", "CZEPEKU Fantasy Maps", "Monster Fighting Pit");
-    const original = join(mapPath, "Empty Day.jpg");
-    const preview = join(output, "czepuku", "CZEPEKU Fantasy Maps", "Monster Fighting Pit", "_previews", "Empty Day.jpg.webp");
     const thumbnail = join(output, "czepuku", "CZEPEKU Fantasy Maps", "Monster Fighting Pit", "_thumbnails", "Empty Day.jpg.webp");
-    const [originalContents, originalStats, previewStats] = await Promise.all([readFile(original), stat(original), stat(preview)]);
     await rm(thumbnail);
-    await writeFile(original, "no longer decodable");
-    await utimes(original, new Date(previewStats.mtimeMs - 1000), new Date(previewStats.mtimeMs - 1000));
 
     // #when
-    const summary = await generate().finally(async () => {
-      await writeFile(original, originalContents);
-      await utimes(original, originalStats.atime, originalStats.mtime);
-    });
+    const summary = await generate();
 
     // #then
     expect(summary).toEqual({
@@ -417,5 +417,98 @@ describe("generateCatalog", () => {
       likelyDumps: [{ path: "battlemaps", variants: 61 }],
       summary: [{ zipArchives: 2, likelyDumps: 1 }],
     });
+  });
+
+  test("adds and removes a map on successive full regeneration passes without leaving Catalog orphans", async () => {
+    // #given
+    const added = join(collection, "Live", "Added", "Day.jpg");
+    const catalog = join(output, "Live", "Added");
+    await image(added, TINY, TINY, "jpeg");
+
+    // #when
+    await generate();
+    const beforeRemoval = await readJson<MapIndex>(join(catalog, "index.json"));
+    await rm(join(collection, "Live"), { recursive: true });
+    await generate();
+
+    // #then
+    expect(beforeRemoval.path).toBe("Live/Added");
+    expect(await Bun.file(join(catalog, "index.json")).exists()).toBe(false);
+    expect(await Bun.file(join(catalog, "_thumbnails", "Day.jpg.webp")).exists()).toBe(false);
+  });
+
+  test("keeps the existing catalog when a pass finds an empty collection", async () => {
+    // #given
+    const emptyCollection = join(workDir, "empty-collection");
+    await mkdir(emptyCollection, { recursive: true });
+    await generate();
+    const before = await snapshot(output);
+
+    // #when
+    await Effect.runPromise(
+      generateCatalog({
+        filesPath: emptyCollection,
+        dataPath: output,
+        overridesPath: join(workDir, "no-overrides.json"),
+        thumbnailConcurrency: 2,
+      }),
+    );
+    const derivedImagesAfter = (await snapshot(output)).filter((line) => line.includes("_thumbnails/") || line.includes("_previews/"));
+
+    // #then
+    expect(derivedImagesAfter).toEqual(before.filter((line) => line.includes("_thumbnails/") || line.includes("_previews/")));
+    expect(derivedImagesAfter.length).toBeGreaterThan(0);
+  });
+
+  test("regenerates a Variant restored with an older mtime", async () => {
+    // #given
+    const original = join(collection, "Pack 09", "Ancient Ruins", "Ruins_BaseDayGL.png");
+    const preview = join(output, "Pack 09", "Ancient Ruins", "_previews", "Ruins_BaseDayGL.png.webp");
+    const originalContents = await readFile(original);
+    await writeFile(original, originalContents);
+    await utimes(original, new Date(1_000), new Date(1_000));
+
+    // #when
+    const summary = await generate();
+
+    // #then
+    expect(summary.previewsCreated).toBe(1);
+    expect((await sharp(preview).metadata()).format).toBe("webp");
+  });
+});
+
+describe("RegenerationController", () => {
+  test("coalesces triggers that arrive while a regeneration pass is running", async () => {
+    // #given
+    let releaseFirstPass: (() => void) | undefined;
+    let calls = 0;
+
+    const firstPass = new Promise<void>((resolve) => {
+      releaseFirstPass = resolve;
+    });
+
+    const controller = new RegenerationController({
+      debounceMs: 0,
+      reconcileIntervalMs: 60_000,
+      regenerate: async () => {
+        calls += 1;
+
+        if (calls === 1) await firstPass;
+      },
+      onError: () => undefined,
+    });
+
+    // #when
+    const initial = controller.start();
+    controller.trigger();
+    controller.trigger();
+    await Bun.sleep(10);
+    releaseFirstPass?.();
+    await initial;
+    await Bun.sleep(10);
+    controller.stop();
+
+    // #then
+    expect(calls).toBe(2);
   });
 });

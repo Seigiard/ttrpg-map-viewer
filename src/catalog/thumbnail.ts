@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { rename, rm } from "node:fs/promises";
 import sharp from "sharp";
 import { ownedPromise } from "../utils/owned-promise.ts";
-import { ensureParentDirectory, type FileSystemError, mtimeOrNull } from "./file-system.ts";
+import { ensureParentDirectory, type FileSystemError, mtimeOrNull, readTextFile, writeFileAtomically } from "./file-system.ts";
 
 export const THUMBNAIL_MAX_SIZE = 512;
 
@@ -21,6 +21,14 @@ export class DerivedImageFailure extends Data.TaggedError("DerivedImageFailure")
 }> {}
 
 export type DerivedImageOutcome = "created" | "fresh";
+
+function sourceSignature(mtimeMs: number, size: number): string {
+  return JSON.stringify({ mtimeMs, size });
+}
+
+function sourceSignaturePath(destination: string): string {
+  return `${destination}.source.json`;
+}
 
 function renderStillImage(original: string, destination: string, maxSize: number): Effect.Effect<void, DerivedImageFailure> {
   const temporary = `${destination}.tmp.webp`;
@@ -78,21 +86,29 @@ function renderVideoFrame(original: string, destination: string, maxSize: number
   );
 }
 
-/** Makes a derived WebP unless one at least as new as the original already exists. */
+/** Makes a derived WebP unless its stored Original signature matches the current Original. */
 export function ensureDerivedImage(
   original: string,
   originalMtimeMs: number,
+  originalSize: number,
   destination: string,
   maxSize: number,
   animated: boolean,
 ): Effect.Effect<DerivedImageOutcome, DerivedImageFailure | FileSystemError> {
   return Effect.gen(function* () {
+    const signature = sourceSignature(originalMtimeMs, originalSize);
+
+    const existingSignature = yield* readTextFile(sourceSignaturePath(destination)).pipe(
+      Effect.catchTag("FileSystemNotFound", () => Effect.succeed(null)),
+    );
+
     const existingMtime = yield* mtimeOrNull(destination);
 
-    if (existingMtime !== null && existingMtime >= originalMtimeMs) return "fresh";
+    if (existingMtime !== null && existingSignature === signature) return "fresh";
 
     yield* ensureParentDirectory(destination);
     yield* animated ? renderVideoFrame(original, destination, maxSize) : renderStillImage(original, destination, maxSize);
+    yield* writeFileAtomically(sourceSignaturePath(destination), signature);
 
     return "created";
   });

@@ -1,6 +1,6 @@
 import { Data, Effect } from "effect";
 import type { Dirent, Stats } from "node:fs";
-import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { ownedPromise } from "../utils/owned-promise.ts";
 
@@ -71,4 +71,18 @@ export function writeFileAtomically(path: string, content: string): Effect.Effec
       }),
     ),
   );
+}
+
+/** Avoids changing the mtime of Catalog data whose serialized value did not change. */
+export function writeTextFileIfChanged(path: string, content: string): Effect.Effect<void, FileSystemError> {
+  return readTextFile(path).pipe(
+    Effect.flatMap((existing) => (existing === content ? Effect.void : writeFileAtomically(path, content))),
+    Effect.catchTag("FileSystemNotFound", () => writeFileAtomically(path, content)),
+  );
+}
+
+export function removePath(path: string): Effect.Effect<void, FileSystemError> {
+  return fsEffect("rm", path, async () => {
+    await rm(path, { recursive: true, force: true });
+  });
 }
