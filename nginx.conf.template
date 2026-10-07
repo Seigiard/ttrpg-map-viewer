@@ -24,7 +24,7 @@ http {
         absolute_redirect off;
 
         # The underscore prefixes keep served files apart from SPA routes, which mirror collection folder names.
-        # A top-level collection folder named _app, _catalog, _original or api would be shadowed.
+        # A top-level collection folder named _app, _catalog, _original, _download or api would be shadowed.
 
         location ^~ /_app/ {
             alias /app/static/;
@@ -48,6 +48,14 @@ http {
         # Originals, straight from the read-only collection mount.
         location ^~ /_original/ {
             alias ${FILES}/;
+            expires 1d;
+            add_header Cache-Control "public, must-revalidate";
+        }
+
+        # A server-set attachment header works even where browsers disregard an anchor's download attribute.
+        location ^~ /_download/ {
+            alias ${FILES}/;
+            add_header Content-Disposition "attachment";
             expires 1d;
             add_header Cache-Control "public, must-revalidate";
         }

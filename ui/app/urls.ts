@@ -5,6 +5,8 @@ const CATALOG_PREFIX = "/_catalog";
 
 const ORIGINAL_PREFIX = "/_original";
 
+const DOWNLOAD_PREFIX = "/_download";
+
 function encodePath(path: CatalogPath): string {
   return path.split("/").map(encodeURIComponent).join("/");
 }
@@ -23,6 +25,10 @@ export function catalogFileUrl(path: CatalogPath): string {
 
 export function originalUrl(mapPath: CatalogPath, file: string): string {
   return `${ORIGINAL_PREFIX}/${encodePath(mapPath)}/${encodeURIComponent(file)}`;
+}
+
+export function downloadUrl(mapPath: CatalogPath, file: string): string {
+  return `${DOWNLOAD_PREFIX}/${encodePath(mapPath)}/${encodeURIComponent(file)}`;
 }
 
 /** Inverse of folderUrl: the browser hands over a percent-encoded pathname. */

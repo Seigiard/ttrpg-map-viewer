@@ -1,5 +1,5 @@
 FROM oven/bun:1-alpine AS base
-RUN apk add --no-cache nginx
+RUN apk add --no-cache ffmpeg nginx
 WORKDIR /app
 
 FROM base AS development

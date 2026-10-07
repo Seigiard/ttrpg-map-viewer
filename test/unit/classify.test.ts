@@ -14,11 +14,11 @@ describe("isVariantFile", () => {
     expect(["a.webp", "a.jpg", "a.JPEG", "Original Day.PNG"].map(isVariantFile)).toEqual([true, true, true, true]);
   });
 
-  test("rejects archives, videos, data files and hidden files", () => {
+  test("accepts animated variants and rejects archives, data files and hidden files", () => {
     expect(["pack.zip", "loop.webm", "loop.mp4", "map.dd2vtt", "notes.txt", ".hidden.jpg", "jpg"].map(isVariantFile)).toEqual([
       false,
-      false,
-      false,
+      true,
+      true,
       false,
       false,
       false,

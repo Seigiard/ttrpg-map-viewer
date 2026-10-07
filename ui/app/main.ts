@@ -1,5 +1,5 @@
-import type { CatalogPath, CategoryIndex, Cover, FolderIndex, MapIndex } from "../../src/catalog/model.ts";
-import { catalogFileUrl, folderUrl, indexUrl, originalUrl, pathFromLocation } from "./urls.ts";
+import type { CatalogPath, CategoryIndex, Cover, FolderIndex, MapIndex, Variant } from "../../src/catalog/model.ts";
+import { catalogFileUrl, downloadUrl, folderUrl, indexUrl, originalUrl, pathFromLocation } from "./urls.ts";
 
 const ROOT_TITLE = "Catalog";
 
@@ -87,16 +87,74 @@ function renderCategory(index: CategoryIndex): HTMLElement[] {
   return sections;
 }
 
-// Placeholder until the map page (preview, variant switching) lands: cover plus links to the originals.
+function variantUrl(path: CatalogPath, file: string): string {
+  return `${folderUrl(path)}?v=${encodeURIComponent(file)}`;
+}
+
+function selectedVariant(index: MapIndex): Variant {
+  const requested = new URLSearchParams(location.search).get("v");
+
+  return (
+    index.variants.find((variant) => variant.file === requested) ??
+    index.variants.find((variant) => variant.file === index.cover.variant) ??
+    index.variants[0]!
+  );
+}
+
+function variantThumbnail(variant: Variant): HTMLElement {
+  if (variant.thumbnail === null) return element("div", { className: "variant-thumb thumb-missing" }, "no thumbnail");
+
+  return element("img", {
+    className: "variant-thumb",
+    src: catalogFileUrl(variant.thumbnail),
+    alt: "",
+    loading: "lazy",
+    decoding: "async",
+  });
+}
+
+function preview(index: MapIndex, variant: Variant): HTMLElement {
+  if (variant.animated) {
+    return element("video", {
+      className: "preview",
+      src: originalUrl(index.path, variant.file),
+      poster: variant.preview === null ? "" : catalogFileUrl(variant.preview),
+      muted: true,
+      loop: true,
+      autoplay: true,
+      controls: true,
+    });
+  }
+
+  if (variant.preview === null) return element("p", { className: "notice" }, "Preview unavailable.");
+
+  return element("img", { className: "preview", src: catalogFileUrl(variant.preview), alt: index.name });
+}
+
 function renderMap(index: MapIndex): HTMLElement[] {
+  const selected = selectedVariant(index);
+
   return [
-    thumbnail(index.cover, index.name),
+    preview(index, selected),
+    element(
+      "p",
+      { className: "actions" },
+      element("a", { href: originalUrl(index.path, selected.file), target: "_blank", rel: "noreferrer" }, "Open original"),
+      " ",
+      element("a", { href: downloadUrl(index.path, selected.file) }, "Download"),
+    ),
     element(
       "ul",
       { className: "variants" },
-      ...index.variants.map((variant) =>
-        element("li", {}, element("a", { href: originalUrl(index.path, variant.file) }, stripExtension(variant.file))),
-      ),
+      ...index.variants.map((variant) => {
+        const link = navLink("");
+        link.href = variantUrl(index.path, variant.file);
+        link.className = variant.file === selected.file ? "selected" : "";
+        link.setAttribute("aria-current", variant.file === selected.file ? "true" : "false");
+        link.append(variantThumbnail(variant), element("span", { className: "name" }, stripExtension(variant.file)));
+
+        return element("li", {}, link);
+      }),
     ),
   ];
 }

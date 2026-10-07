@@ -1,7 +1,8 @@
 import type { CatalogPath } from "./model.ts";
 
-/** Still images only; animated variants (webm/mp4) arrive with the map page work. */
-const VARIANT_EXTENSIONS: ReadonlySet<string> = new Set(["webp", "jpg", "jpeg", "png"]);
+const VARIANT_EXTENSIONS: ReadonlySet<string> = new Set(["webp", "jpg", "jpeg", "png", "webm", "mp4"]);
+
+const ANIMATED_VARIANT_EXTENSIONS: ReadonlySet<string> = new Set(["webm", "mp4"]);
 
 export interface FileListing {
   readonly name: string;
@@ -52,6 +53,12 @@ export function isVariantFile(name: string): boolean {
   const dot = name.lastIndexOf(".");
 
   return dot > 0 && VARIANT_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
+}
+
+export function isAnimatedVariant(name: string): boolean {
+  const dot = name.lastIndexOf(".");
+
+  return dot > 0 && ANIMATED_VARIANT_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
 }
 
 export function classifyCollection(root: FolderListing): Classification {

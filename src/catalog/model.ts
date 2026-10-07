@@ -28,6 +28,12 @@ export interface Variant {
   /** File name in the map folder; the original lives at the map path plus this name. */
   readonly file: string;
   readonly size: number;
+  /** Whether the original is a video loop instead of a still image. */
+  readonly animated: boolean;
+  /** Output-tree-relative path of the variant's thumbnail; null when it could not be made. */
+  readonly thumbnail: CatalogPath | null;
+  /** Output-tree-relative path of the variant's preview; null when it could not be made. */
+  readonly preview: CatalogPath | null;
 }
 
 export interface CategoryIndex {
