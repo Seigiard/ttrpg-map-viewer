@@ -13,3 +13,16 @@ Default five-role vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `
 ### Domain docs
 
 Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+## Architecture
+
+One Docker image: nginx on :80 in front, Bun on 127.0.0.1:3000. Bun runs a one-shot full generation at start (`src/catalog/generate.ts`, Effect 4) that walks the read-only collection (`FILES`) and writes the catalog into a separate output mirror tree (`DATA`): one `index.json` per category and map, cover thumbnails under `<map>/_thumbnails/`. The contract between generator and SPA is `src/catalog/model.ts`; it stays browser-importable.
+
+- Nothing is ever written under `FILES`. Docker mounts it `:ro`.
+- nginx routes: `/_app/` SPA assets, `/_catalog/` output tree, `/_original/` collection, `/api/` Bun. Every other path is an SPA route that mirrors a folder path and falls back to `index.html`. The prefixes live in `nginx.conf.template` and `ui/app/urls.ts`; change both together.
+- `static/` is built by `bun run build:ui` inside the Docker `ui` stage and is not committed.
+- Promise crossings in Effect code go through `src/utils/owned-promise.ts`; `catalog/no-direct-effect-promise` (in `tools/oxlint/catalog/`) enforces it. `tools/oxlint/anti-slop/` is vendored: never edit it.
+
+## Finishing a task
+
+Run until clean: `bun run fix`, `bun run lint`, `bun run typecheck`, `bun run test`. After touching nginx, the entrypoint, or the Dockerfile, also build the image and curl it against a small fixture collection.

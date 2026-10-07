@@ -1,0 +1,35 @@
+import type { CatalogPath } from "../../src/catalog/model.ts";
+
+// These prefixes must match the locations in nginx.conf.template.
+const CATALOG_PREFIX = "/_catalog";
+
+const ORIGINAL_PREFIX = "/_original";
+
+function encodePath(path: CatalogPath): string {
+  return path.split("/").map(encodeURIComponent).join("/");
+}
+
+export function folderUrl(path: CatalogPath): string {
+  return path === "" ? "/" : `/${encodePath(path)}/`;
+}
+
+export function indexUrl(path: CatalogPath): string {
+  return path === "" ? `${CATALOG_PREFIX}/index.json` : `${CATALOG_PREFIX}/${encodePath(path)}/index.json`;
+}
+
+export function catalogFileUrl(path: CatalogPath): string {
+  return `${CATALOG_PREFIX}/${encodePath(path)}`;
+}
+
+export function originalUrl(mapPath: CatalogPath, file: string): string {
+  return `${ORIGINAL_PREFIX}/${encodePath(mapPath)}/${encodeURIComponent(file)}`;
+}
+
+/** Inverse of folderUrl: the browser hands over a percent-encoded pathname. */
+export function pathFromLocation(pathname: string): CatalogPath {
+  return pathname
+    .split("/")
+    .filter((segment) => segment !== "")
+    .map(decodeURIComponent)
+    .join("/");
+}

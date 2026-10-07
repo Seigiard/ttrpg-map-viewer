@@ -1,0 +1,14 @@
+services:
+  test:
+    build:
+      context: .
+      target: development
+    volumes:
+      - ./src:/app/src:ro
+      - ./test:/app/test:ro
+      - ./ui:/app/ui:ro
+      - ./bunfig.toml:/app/bunfig.toml:ro
+      - ./tsconfig.json:/app/tsconfig.json:ro
+    environment:
+      - LOG_LEVEL=error
+    command: ["bun", "test", "test/unit"]

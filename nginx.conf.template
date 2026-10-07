@@ -1,0 +1,68 @@
+daemon off;
+worker_processes auto;
+error_log /dev/stderr warn;
+pid /run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    charset utf-8;
+    charset_types application/json text/css application/javascript;
+
+    access_log /dev/stdout;
+
+    sendfile on;
+    tcp_nopush on;
+
+    server {
+        listen 80;
+        server_name _;
+        absolute_redirect off;
+
+        # The underscore prefixes keep served files apart from SPA routes, which mirror collection folder names.
+        # A top-level collection folder named _app, _catalog, _original or api would be shadowed.
+
+        location ^~ /_app/ {
+            alias /app/static/;
+            add_header Cache-Control "no-cache";
+        }
+
+        # Output mirror tree: index.json per folder plus derived images.
+        location ^~ /_catalog/ {
+            alias ${DATA}/;
+
+            location ~ \.json$ {
+                add_header Cache-Control "no-cache";
+            }
+
+            location ~ \.webp$ {
+                expires 1d;
+                add_header Cache-Control "public, must-revalidate";
+            }
+        }
+
+        # Originals, straight from the read-only collection mount.
+        location ^~ /_original/ {
+            alias ${FILES}/;
+            expires 1d;
+            add_header Cache-Control "public, must-revalidate";
+        }
+
+        # Reserved for Bun endpoints; Bun answers 501 until any exist.
+        location ^~ /api/ {
+            proxy_pass http://127.0.0.1:${BUN_PORT};
+            proxy_set_header Host $host;
+        }
+
+        # Every other path is an SPA route mirroring a folder path, so deep links survive a reload.
+        location / {
+            root /app/static;
+            try_files /index.html =404;
+            add_header Cache-Control "no-cache";
+        }
+    }
+}

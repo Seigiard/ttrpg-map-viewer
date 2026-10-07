@@ -1,4 +1,8 @@
 node_modules/
 out/
+static/
+files/
+coverage/
 .DS_Store
 .env
+.playwright-mcp/
