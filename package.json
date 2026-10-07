@@ -1,0 +1,30 @@
+{
+  "name": "ttrpg-map-viewer",
+  "private": true,
+  "type": "module",
+  "module": "src/server.ts",
+  "scripts": {
+    "start": "docker compose up --build",
+    "rebuild": "docker compose build",
+    "lint": "oxlint --deny-warnings .",
+    "lint:fix": "oxlint --fix .",
+    "format": "oxfmt --check .",
+    "format:fix": "oxfmt --write .",
+    "fix": "bun run format:fix && bun run lint:fix",
+    "typecheck": "tsc --noEmit",
+    "test": "LOG_LEVEL=error bun test test/unit",
+    "test:docker": "docker compose -f docker-compose.test.yml run --rm test",
+    "build:ui": "bun ui/scripts/build-ui.ts"
+  },
+  "dependencies": {
+    "effect": "4.0.1",
+    "sharp": "^0.35.5"
+  },
+  "devDependencies": {
+    "@oxlint/plugins": "1.87.0",
+    "@types/bun": "latest",
+    "oxfmt": "^0.72.0",
+    "oxlint": "1.87.0",
+    "typescript": "^5"
+  }
+}

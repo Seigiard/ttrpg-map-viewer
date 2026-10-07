@@ -1,0 +1,19 @@
+services:
+  catalog:
+    build:
+      context: .
+      target: production
+    ports:
+      - "8080:80"
+    volumes:
+      # The collection is mounted read-only; nothing is ever written into it.
+      - ${COLLECTION:-./files}:/maps:ro
+      - catalog-data:/data
+    environment:
+      - FILES=/maps
+      - DATA=/data
+      # - THUMBNAIL_CONCURRENCY=2
+    restart: unless-stopped
+
+volumes:
+  catalog-data:
