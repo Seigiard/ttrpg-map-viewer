@@ -17,27 +17,33 @@ export interface ApplyReport extends Validation {
 /** Checks every entry against the disk without changing anything. */
 export function validatePlan(dumpDir: string, entries: PlanEntry[]): Validation {
   const result: Validation = { todo: [], alreadyDone: [], problems: [] };
+
   if (!isDir(dumpDir)) {
     result.problems.push(`dump folder not found: ${dumpDir}`);
+
     return result;
   }
 
   const seen = new Map<string, string>();
+
   for (const entry of entries) {
     const { file, folder } = entry;
     const where = `"${file}" -> "${folder}"`;
 
     const earlier = seen.get(file);
+
     if (earlier !== undefined) {
       result.problems.push(`${where}: file listed twice (also -> "${earlier}")`);
       continue;
     }
+
     seen.set(file, folder);
 
     if (file === "" || file.includes("/") || file === "." || file === "..") {
       result.problems.push(`${where}: file must be a plain name directly inside the dump`);
       continue;
     }
+
     if (folder === "" || folder.includes("/") || folder === "." || folder === ".." || folder.includes("\0")) {
       result.problems.push(`${where}: folder must be a single non-empty name inside the dump`);
       continue;
@@ -63,6 +69,7 @@ export function validatePlan(dumpDir: string, entries: PlanEntry[]): Validation 
       result.problems.push(`${where}: file not found in the dump or in the target folder`);
     }
   }
+
   return result;
 }
 
@@ -73,13 +80,16 @@ export function validatePlan(dumpDir: string, entries: PlanEntry[]): Validation 
 export function applyPlan(dumpDir: string, entries: PlanEntry[]): ApplyReport {
   const validation = validatePlan(dumpDir, entries);
   const report: ApplyReport = { ...validation, moved: [] };
+
   if (validation.problems.length > 0) return report;
 
   for (const entry of validation.todo) {
     const folderPath = join(dumpDir, entry.folder);
     const target = join(folderPath, entry.file);
+
     try {
       mkdirSync(folderPath, { recursive: true });
+
       // rename() overwrites silently on POSIX; re-check right before it in case
       // something appeared since validation.
       if (exists(target)) throw new Error(`"${entry.folder}/${entry.file}" appeared during apply; refusing to overwrite`);
@@ -90,6 +100,7 @@ export function applyPlan(dumpDir: string, entries: PlanEntry[]): ApplyReport {
       break;
     }
   }
+
   return report;
 }
 
