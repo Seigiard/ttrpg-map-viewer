@@ -3,6 +3,7 @@ import { generateCatalog } from "./catalog/generate.ts";
 import { RegenerationController } from "./catalog/regeneration.ts";
 import { loadConfig } from "./config.ts";
 import { log } from "./logging/index.ts";
+import { mapZipResponse } from "./map-zip.ts";
 
 const config = loadConfig();
 
@@ -24,7 +25,7 @@ const regeneration = new RegenerationController({
 const server = Bun.serve({
   port: config.port,
   hostname: "127.0.0.1",
-  fetch(req) {
+  async fetch(req) {
     const url = new URL(req.url);
 
     if (url.pathname === "/internal/regenerate" && req.method === "POST") {
@@ -32,6 +33,8 @@ const server = Bun.serve({
 
       return new Response(null, { status: 202 });
     }
+
+    if (url.pathname === "/api/map-zip") return mapZipResponse(req, config);
 
     if (url.pathname.startsWith("/api/")) return Response.json({ error: "Not implemented" }, { status: 501 });
 

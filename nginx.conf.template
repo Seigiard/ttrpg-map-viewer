@@ -60,10 +60,12 @@ http {
             add_header Cache-Control "public, must-revalidate";
         }
 
-        # Reserved for Bun endpoints; Bun answers 501 until any exist.
+        # ZIPs stream from Bun without nginx buffering the whole archive.
         location ^~ /api/ {
             proxy_pass http://127.0.0.1:${BUN_PORT};
             proxy_set_header Host $host;
+            proxy_buffering off;
+            proxy_read_timeout 1h;
         }
 
         # Every other path is an SPA route mirroring a folder path, so deep links survive a reload.

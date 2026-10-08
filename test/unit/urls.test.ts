@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { downloadUrl, folderUrl, indexUrl, originalUrl, pathFromLocation, searchIndexUrl } from "../../ui/app/urls.ts";
+import { downloadUrl, folderUrl, indexUrl, mapZipUrl, originalUrl, pathFromLocation, searchIndexUrl } from "../../ui/app/urls.ts";
 
 describe("SPA URLs mirror folder paths", () => {
   test("a folder URL round-trips through the browser pathname, including spaces, # and non-ASCII names", () => {
@@ -17,6 +17,7 @@ describe("SPA URLs mirror folder paths", () => {
     expect(indexUrl("Pack 09/Ruins")).toBe("/_catalog/Pack%2009/Ruins/index.json");
     expect(originalUrl("Pack 09/Ruins", "Day #2.png")).toBe("/_original/Pack%2009/Ruins/Day%20%232.png");
     expect(downloadUrl("Pack 09/Ruins", "Day #2.png")).toBe("/_download/Pack%2009/Ruins/Day%20%232.png");
+    expect(mapZipUrl("Pack 09/Ruins")).toBe("/api/map-zip?path=Pack%2009%2FRuins");
     expect(searchIndexUrl()).toBe("/_catalog/search.json");
   });
 });

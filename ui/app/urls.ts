@@ -35,6 +35,10 @@ export function downloadUrl(mapPath: CatalogPath, file: string): string {
   return `${DOWNLOAD_PREFIX}/${encodePath(mapPath)}/${encodeURIComponent(file)}`;
 }
 
+export function mapZipUrl(path: CatalogPath): string {
+  return `/api/map-zip?path=${encodeURIComponent(path)}`;
+}
+
 /** Inverse of folderUrl: the browser hands over a percent-encoded pathname. */
 export function pathFromLocation(pathname: string): CatalogPath {
   return pathname
