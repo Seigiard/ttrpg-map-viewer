@@ -2,25 +2,29 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { applyPlan } from "./apply.ts";
-import { groupFiles, parsePlan, renderPlan, scanDump } from "./plan.ts";
+import { type GroupingMode, groupFiles, parsePlan, renderPlan, scanDump } from "./plan.ts";
 
 const USAGE = `Usage:
-  sort-dump plan <dumpDir> [--out <planFile>] [--force]   dry run: write the plan, move nothing
+  sort-dump plan <dumpDir> [--out <planFile>] [--force] [--one-per-file]
+                                                          dry run: write the plan, move nothing
   sort-dump apply <planFile> [--dump <dumpDir>]           move files exactly as the plan says
 
 Shorthands: "sort-dump <dumpDir>" = plan, "sort-dump --apply <planFile>" = apply.
+--one-per-file gives every file its own map folder, named after the file; use it for packs.
 Default plan file: ./sort-dump.plan (never written into the dump).`;
 
 export function main(argv: string[]): number {
   const positional: string[] = [];
   const options = new Map<string, string>();
   let force = false;
+  let mode: GroupingMode = "normalised";
   let command: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
 
     if (arg === "--force") force = true;
+    else if (arg === "--one-per-file") mode = "one-per-file";
     else if (arg === "--apply") command = "apply";
     else if (arg === "--out" || arg === "--dump") options.set(arg, argv[++i] ?? "");
     else if (arg.startsWith("--")) return usage();
@@ -33,7 +37,7 @@ export function main(argv: string[]): number {
   if (positional.length !== 1) return usage();
 
   if (command === "plan") {
-    return runPlan(resolve(positional[0]!), resolve(options.get("--out") || "sort-dump.plan"), force);
+    return runPlan(resolve(positional[0]!), resolve(options.get("--out") || "sort-dump.plan"), force, mode);
   }
 
   const dump = options.get("--dump");
@@ -47,7 +51,7 @@ function usage(): number {
   return 2;
 }
 
-function runPlan(dumpDir: string, planFile: string, force: boolean): number {
+function runPlan(dumpDir: string, planFile: string, force: boolean, mode: GroupingMode): number {
   if (existsSync(planFile) && !force) {
     console.error(`${planFile} already exists; it may hold your edits. Pass --force to overwrite or --out to pick another file.`);
 
@@ -55,7 +59,7 @@ function runPlan(dumpDir: string, planFile: string, force: boolean): number {
   }
 
   const listing = scanDump(dumpDir);
-  const groups = groupFiles(listing.variants, listing.dirs);
+  const groups = groupFiles(listing.variants, listing.dirs, mode);
   writeFileSync(planFile, renderPlan(dumpDir, groups, listing.ignored));
 
   const multi = groups.filter((g) => g.files.length > 1);

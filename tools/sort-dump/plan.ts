@@ -1,7 +1,13 @@
 import { readdirSync } from "node:fs";
-import { authorsIn, isVariantFile, normalise } from "./normalise.ts";
+import { authorsIn, isVariantFile, normalise, stripExtensions } from "./normalise.ts";
 
 export const ARROW = " -> ";
+
+/**
+ * `normalised` groups Grid/HD/Day/Night variants of one map (DnDavid-style dumps).
+ * `one-per-file` is for packs, where names that differ only by spacing, commas or "(N)" are different maps.
+ */
+export type GroupingMode = "normalised" | "one-per-file";
 
 export interface PlanEntry {
   file: string;
@@ -44,12 +50,12 @@ function fitsPlanFormat(name: string): boolean {
   return !name.includes(ARROW.trim()) && !/[\n\r]/.test(name) && !/^(#|dump:)/.test(name);
 }
 
-export function groupFiles(files: string[], existingDirs: string[] = []): MapGroup[] {
+export function groupFiles(files: string[], existingDirs: string[] = [], mode: GroupingMode = "normalised"): MapGroup[] {
   const authors = new Set(files.flatMap(authorsIn));
   const byKey = new Map<string, MapGroup & { sizes: Set<string>; fellBack: boolean }>();
 
   for (const file of [...files].sort(compareNames)) {
-    const n = normalise(file, authors);
+    const n = mode === "normalised" ? normalise(file, authors) : byStem(file);
     let group = byKey.get(n.key);
 
     if (!group) {
@@ -69,7 +75,7 @@ export function groupFiles(files: string[], existingDirs: string[] = []): MapGro
   for (const group of groups) {
     // Grouping uses exact keys, so "City Under Attack" and "City Under Attack 2"
     // stay apart; flag such near-misses so a human decides.
-    const shorter = groups.filter((g) => g !== group && group.key.startsWith(g.key + " "));
+    const shorter = mode === "normalised" ? groups.filter((g) => g !== group && group.key.startsWith(g.key + " ")) : [];
 
     for (const other of shorter) group.notes.push(`name extends "${other.folder}" — same map or a separate one?`);
 
@@ -81,6 +87,13 @@ export function groupFiles(files: string[], existingDirs: string[] = []): MapGro
   }
 
   return groups.map(({ key, folder, files, notes }) => ({ key, folder, files, notes })).sort((a, b) => compareNames(a.folder, b.folder));
+}
+
+function byStem(file: string): ReturnType<typeof normalise> {
+  // parsePlan trims the folder, so the planned name must already be trimmed.
+  const stem = stripExtensions(file).trim();
+
+  return { key: stem, folder: stem, fellBack: false };
 }
 
 export function renderPlan(dumpDir: string, groups: MapGroup[], ignored: string[] = []): string {
