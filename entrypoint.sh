@@ -20,20 +20,31 @@ echo "[entrypoint] Starting Bun server on port $BUN_PORT..."
 bun --smol run /app/src/server.ts &
 BUN_PID=$!
 
+echo "[entrypoint] Starting collection watcher..."
+/app/src/watcher.sh &
+WATCHER_PID=$!
+
 cleanup() {
   echo "[entrypoint] Shutting down..."
   kill "$BUN_PID" 2>/dev/null || true
+  kill "$WATCHER_PID" 2>/dev/null || true
   kill "$NGINX_PID" 2>/dev/null || true
   wait
-  exit 0
+  exit "${1:-0}"
 }
 
 trap cleanup SIGTERM SIGINT
 
 while true; do
   kill -0 "$BUN_PID" 2>/dev/null || { echo "[entrypoint] Bun process died"; break; }
+  # The watcher only speeds up regeneration; reconcile covers for it, so a dead watcher is restarted, not fatal.
+  kill -0 "$WATCHER_PID" 2>/dev/null || {
+    echo "[entrypoint] Watcher process died; restarting it"
+    /app/src/watcher.sh &
+    WATCHER_PID=$!
+  }
   kill -0 "$NGINX_PID" 2>/dev/null || { echo "[entrypoint] nginx process died"; break; }
   sleep 5
 done
 
-cleanup
+cleanup 1

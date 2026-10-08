@@ -1,5 +1,5 @@
 FROM oven/bun:1-alpine AS base
-RUN apk add --no-cache nginx
+RUN apk add --no-cache ffmpeg inotify-tools nginx
 WORKDIR /app
 
 FROM base AS development
@@ -12,13 +12,24 @@ COPY src/catalog/model.ts ./src/catalog/model.ts
 COPY ui ./ui
 RUN bun run build:ui
 
+FROM node:22-alpine AS planar
+RUN apk add --no-cache git
+WORKDIR /build
+COPY planar /vendor
+RUN git clone "$(sed -n '1p' /vendor/UPSTREAM)" planar \
+  && git -C planar checkout --detach "$(sed -n '2p' /vendor/UPSTREAM)" \
+  && git -C planar apply /vendor/patches/*.patch \
+  && npm --prefix planar ci \
+  && npm --prefix planar run build
+
 FROM base AS production
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile --production
 COPY src ./src
 COPY --from=ui /app/static ./static
+COPY --from=planar /build/planar/out ./planar
 COPY nginx.conf.template entrypoint.sh ./
-RUN chmod +x /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh /app/src/watcher.sh
 
 ENV FILES=/maps
 ENV DATA=/data

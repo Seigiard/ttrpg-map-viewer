@@ -14,11 +14,11 @@ describe("isVariantFile", () => {
     expect(["a.webp", "a.jpg", "a.JPEG", "Original Day.PNG"].map(isVariantFile)).toEqual([true, true, true, true]);
   });
 
-  test("rejects archives, videos, data files and hidden files", () => {
+  test("accepts animated variants and rejects archives, data files and hidden files", () => {
     expect(["pack.zip", "loop.webm", "loop.mp4", "map.dd2vtt", "notes.txt", ".hidden.jpg", "jpg"].map(isVariantFile)).toEqual([
       false,
-      false,
-      false,
+      true,
+      true,
       false,
       false,
       false,
@@ -83,7 +83,7 @@ describe("classifyCollection", () => {
     expect(classifyCollection(folder("", ["pack.zip"])).root).toEqual({ kind: "category", name: "", path: "", categories: [], maps: [] });
   });
 
-  test("a folder with images and subfolders is a map for now and is reported as mixed", () => {
+  test("a mixed folder is a category with a loose-image map and its classified children", () => {
     // #given
     const root = folder("", [], [folder("Pack", ["Cover.jpg"], [folder("Pack/Extra", ["a.jpg"])])]);
 
@@ -91,8 +91,32 @@ describe("classifyCollection", () => {
     const result = classifyCollection(root);
 
     // #then
-    expect(result.root.maps.map((map) => map.path)).toEqual(["Pack"]);
-    expect(result.mixedFolders).toEqual(["Pack"]);
+    expect(result.root.categories).toEqual([
+      {
+        kind: "category",
+        name: "Pack",
+        path: "Pack",
+        categories: [],
+        maps: [
+          {
+            kind: "map",
+            name: "Pack",
+            path: "Pack/._loose",
+            sourcePath: "Pack",
+            variants: [file("Cover.jpg")],
+            cover: file("Cover.jpg"),
+          },
+          {
+            kind: "map",
+            name: "Extra",
+            path: "Pack/Extra",
+            sourcePath: "Pack/Extra",
+            variants: [file("a.jpg")],
+            cover: file("a.jpg"),
+          },
+        ],
+      },
+    ]);
   });
 
   test("children are sorted by name", () => {

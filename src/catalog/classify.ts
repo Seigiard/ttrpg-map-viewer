@@ -1,12 +1,17 @@
-import type { CatalogPath } from "./model.ts";
+import type { CatalogPath, MapMetadata, VariantMetadata } from "./model.ts";
 
-/** Still images only; animated variants (webm/mp4) arrive with the map page work. */
-const VARIANT_EXTENSIONS: ReadonlySet<string> = new Set(["webp", "jpg", "jpeg", "png"]);
+const VARIANT_EXTENSIONS: ReadonlySet<string> = new Set(["webp", "jpg", "jpeg", "png", "webm", "mp4"]);
+
+const ANIMATED_VARIANT_EXTENSIONS: ReadonlySet<string> = new Set(["webm", "mp4"]);
+
+// Hidden collection folders are ignored, so this output-only segment cannot clash with a catalogued child folder.
+const LOOSE_MAP_SEGMENT = "._loose";
 
 export interface FileListing {
   readonly name: string;
   readonly size: number;
   readonly mtimeMs: number;
+  readonly metadata?: VariantMetadata;
 }
 
 /** One folder of the collection as found on disk, before any domain meaning is given to it. */
@@ -20,10 +25,13 @@ export interface FolderListing {
 export interface MapNode {
   readonly kind: "map";
   readonly name: string;
+  /** Collection-relative folder containing this Map's Originals. */
+  readonly sourcePath: CatalogPath;
   readonly path: CatalogPath;
   /** Sorted by name; never empty. */
   readonly variants: readonly [FileListing, ...FileListing[]];
   readonly cover: FileListing;
+  readonly metadata?: MapMetadata;
 }
 
 export interface CategoryNode {
@@ -36,8 +44,6 @@ export interface CategoryNode {
 
 export interface Classification {
   readonly root: CategoryNode;
-  /** Folders whose subfolders were not catalogued because the folder itself is a map. */
-  readonly mixedFolders: readonly CatalogPath[];
 }
 
 const nameCollator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
@@ -54,23 +60,36 @@ export function isVariantFile(name: string): boolean {
   return dot > 0 && VARIANT_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
 }
 
-export function classifyCollection(root: FolderListing): Classification {
-  const mixedFolders: CatalogPath[] = [];
+export function isAnimatedVariant(name: string): boolean {
+  const dot = name.lastIndexOf(".");
 
+  return dot > 0 && ANIMATED_VARIANT_EXTENSIONS.has(name.slice(dot + 1).toLowerCase());
+}
+
+export function classifyCollection(root: FolderListing): Classification {
   function classifyFolder(folder: FolderListing): CategoryNode | MapNode | null {
     const variants = folder.files.filter((file) => isVariantFile(file.name)).sort((a, b) => compareNames(a.name, b.name));
     const [first, ...rest] = variants;
 
     if (first) {
-      if (folder.subfolders.length > 0) mixedFolders.push(folder.path);
+      const map: MapNode = {
+        kind: "map",
+        name: folder.name,
+        sourcePath: folder.path,
+        path: folder.path,
+        variants: [first, ...rest],
+        cover: first,
+      };
 
-      return { kind: "map", name: folder.name, path: folder.path, variants: [first, ...rest], cover: first };
+      if (folder.subfolders.length === 0) return map;
+
+      return classifyCategory({ ...folder, files: [] }, { ...map, path: `${folder.path}/${LOOSE_MAP_SEGMENT}` });
     }
 
     return classifyCategory(folder);
   }
 
-  function classifyCategory(folder: FolderListing): CategoryNode | null {
+  function classifyCategory(folder: FolderListing, looseMap?: MapNode): CategoryNode | null {
     const categories: CategoryNode[] = [];
     const maps: MapNode[] = [];
 
@@ -81,6 +100,8 @@ export function classifyCollection(root: FolderListing): Classification {
       else if (node) categories.push(node);
     }
 
+    if (looseMap) maps.unshift(looseMap);
+
     if (categories.length === 0 && maps.length === 0) return null;
 
     return { kind: "category", name: folder.name, path: folder.path, categories, maps };
@@ -89,5 +110,5 @@ export function classifyCollection(root: FolderListing): Classification {
   // The root is always a category, even when empty, so the catalog has a landing page.
   const rootNode = classifyCategory(root) ?? { kind: "category", name: root.name, path: root.path, categories: [], maps: [] };
 
-  return { root: rootNode, mixedFolders };
+  return { root: rootNode };
 }

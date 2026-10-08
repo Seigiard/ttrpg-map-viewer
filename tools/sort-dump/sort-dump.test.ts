@@ -8,15 +8,17 @@ import { groupFiles, parsePlan, renderPlan, scanDump } from "./plan.ts";
 import { main } from "./sort-dump.ts";
 
 const DNDAVID = readListing("dndavid-battlemaps.txt");
+
 const ACHLYS = readListing("achlys-manor.txt");
 
 const tempDirs: string[] = [];
+
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 describe("normalise", () => {
-  test.each([
+  test.each<[string, string, string | undefined]>([
     ["Lake Grid [25x40] (DnDavid).jpg", "Lake", "25x40"],
     ["Lake HD [25x40] (DnDavid).jpg", "Lake", "25x40"],
     ["The Old Fishing Hole HD [30x40] (DnDavid).jpg", "The Old Fishing Hole", "30x40"],
@@ -40,8 +42,8 @@ describe("normalise", () => {
     ["Old GridMap.png", "Old Map", undefined],
   ])("%p -> folder %p", (file, folder, mapSize) => {
     const n = normalise(file);
-    expect(n.folder).toBe(folder as string);
-    expect(n.mapSize).toBe(mapSize as string | undefined);
+    expect(n.folder).toBe(folder);
+    expect(n.mapSize).toBe(mapSize);
   });
 
   test("Grid and HD variants of one DnDavid map share a key", () => {
@@ -52,6 +54,7 @@ describe("normalise", () => {
     const keys = ["Way Side Inn Basement Statue", "WaySide Inn Basement Statue", "way_side-inn  basement statue"].map(
       (s) => normalise(`${s}.jpg`).key,
     );
+
     expect(new Set(keys).size).toBe(1);
   });
 
@@ -145,7 +148,7 @@ describe("plan file", () => {
   test("comments, blank lines and stray spaces are tolerated; malformed lines are errors", () => {
     const parsed = parsePlan("# hi\n\ndump: /d\n  a.jpg ->  A  \nnot a mapping\n");
     expect(parsed.entries).toEqual([{ file: "a.jpg", folder: "A" }]);
-    expect(parsed.errors).toEqual(["line 5: expected \"file -> folder\", got: not a mapping"]);
+    expect(parsed.errors).toEqual(['line 5: expected "file -> folder", got: not a mapping']);
   });
 });
 
@@ -178,10 +181,12 @@ describe("applyPlan", () => {
   test("refuses to overwrite and moves nothing when any target already exists", () => {
     const dump = makeDump(["A.jpg", "B.jpg", "Map/B.jpg"]);
     writeFileSync(join(dump, "Map/B.jpg"), "original");
+
     const report = applyPlan(dump, [
       { file: "A.jpg", folder: "Map" },
       { file: "B.jpg", folder: "Map" },
     ]);
+
     expect(report.problems).toHaveLength(1);
     expect(report.problems[0]).toContain("refusing to overwrite");
     expect(report.moved).toEqual([]);
@@ -191,6 +196,7 @@ describe("applyPlan", () => {
 
   test("reports missing files, duplicates and unsafe folder names before moving anything", () => {
     const dump = makeDump(["A.jpg", "B.jpg", "C.jpg"]);
+
     const report = applyPlan(dump, [
       { file: "A.jpg", folder: "Ok" },
       { file: "Gone.jpg", folder: "X" },
@@ -198,6 +204,7 @@ describe("applyPlan", () => {
       { file: "C.jpg", folder: ".." },
       { file: "A.jpg", folder: "Other" },
     ]);
+
     expect(report.problems).toHaveLength(4);
     expect(report.moved).toEqual([]);
     expect(readdirSync(dump).sort()).toEqual(["A.jpg", "B.jpg", "C.jpg"]);
@@ -236,27 +243,33 @@ describe("CLI", () => {
 });
 
 function readListing(name: string): string[] {
-  return readFileSync(join(import.meta.dir, "fixtures", name), "utf8").split("\n").filter(Boolean);
+  return readFileSync(join(import.meta.dir, "fixtures", name), "utf8")
+    .split("\n")
+    .filter(Boolean);
 }
 
 /** Creates a temp dump of empty files; names ending in "/" become folders. */
 function makeDump(names: string[]): string {
   const dir = mkdtempSync(join(tmpdir(), "sort-dump-"));
   tempDirs.push(dir);
+
   for (const name of names) {
     if (name.endsWith("/")) {
       mkdirSync(join(dir, name), { recursive: true });
       continue;
     }
+
     mkdirSync(join(dir, name, ".."), { recursive: true });
     writeFileSync(join(dir, name), "");
   }
+
   return dir;
 }
 
 function quiet<T>(fn: () => T): T {
   const { log, error } = console;
   console.log = console.error = () => {};
+
   try {
     return fn();
   } finally {

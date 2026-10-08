@@ -25,14 +25,18 @@ export interface DumpListing {
 
 export function scanDump(dumpDir: string): DumpListing {
   const listing: DumpListing = { variants: [], ignored: [], dirs: [] };
+
   for (const entry of readdirSync(dumpDir, { withFileTypes: true })) {
     if (entry.name.startsWith(".")) continue;
+
     if (entry.isDirectory()) listing.dirs.push(entry.name);
     else if (entry.isFile() && isVariantFile(entry.name) && fitsPlanFormat(entry.name)) {
       listing.variants.push(entry.name);
     } else if (entry.isFile()) listing.ignored.push(entry.name);
   }
+
   for (const list of Object.values(listing)) list.sort(compareNames);
+
   return listing;
 }
 
@@ -47,30 +51,36 @@ export function groupFiles(files: string[], existingDirs: string[] = []): MapGro
   for (const file of [...files].sort(compareNames)) {
     const n = normalise(file, authors);
     let group = byKey.get(n.key);
+
     if (!group) {
       group = { key: n.key, folder: n.folder, files: [], notes: [], sizes: new Set(), fellBack: false };
       byKey.set(n.key, group);
     }
+
     group.files.push(file);
+
     if (n.mapSize) group.sizes.add(n.mapSize);
     group.fellBack ||= n.fellBack;
   }
 
   const groups = [...byKey.values()];
   const dirs = new Set(existingDirs.map((d) => d.toLowerCase()));
+
   for (const group of groups) {
     // Grouping uses exact keys, so "City Under Attack" and "City Under Attack 2"
     // stay apart; flag such near-misses so a human decides.
     const shorter = groups.filter((g) => g !== group && group.key.startsWith(g.key + " "));
+
     for (const other of shorter) group.notes.push(`name extends "${other.folder}" — same map or a separate one?`);
+
     if (group.sizes.size > 1) group.notes.push(`mixed map sizes: ${[...group.sizes].sort().join(", ")}`);
+
     if (group.fellBack) group.notes.push("nothing left after stripping variant tokens; kept the raw name");
+
     if (dirs.has(group.folder.toLowerCase())) group.notes.push("folder already exists in the dump; files will be added to it");
   }
 
-  return groups
-    .map(({ key, folder, files, notes }) => ({ key, folder, files, notes }))
-    .sort((a, b) => compareNames(a.folder, b.folder));
+  return groups.map(({ key, folder, files, notes }) => ({ key, folder, files, notes })).sort((a, b) => compareNames(a.folder, b.folder));
 }
 
 export function renderPlan(dumpDir: string, groups: MapGroup[], ignored: string[] = []): string {
@@ -95,19 +105,25 @@ export function renderPlan(dumpDir: string, groups: MapGroup[], ignored: string[
   const section = (title: string, list: MapGroup[]) => {
     if (list.length === 0) return;
     lines.push("", `# ===== ${title} (${list.length}) =====`);
+
     for (const group of list) {
       lines.push("");
+
       for (const note of group.notes) lines.push(`# ? ${note}`);
+
       for (const file of group.files) lines.push(`${file}${ARROW}${group.folder}`);
     }
   };
+
   section("Maps with several variants", multi);
   section("Single-variant maps", single);
 
   if (ignored.length > 0) {
     lines.push("", `# ===== Ignored files, not moved (${ignored.length}) =====`);
+
     for (const file of ignored) lines.push(`#   ${file}`);
   }
+
   return lines.join("\n") + "\n";
 }
 
@@ -121,20 +137,28 @@ export function parsePlan(text: string): ParsedPlan {
   const plan: ParsedPlan = { entries: [], errors: [] };
   text.split(/\r?\n/).forEach((raw, i) => {
     const line = raw.trim();
+
     if (line === "" || line.startsWith("#")) return;
     const dumpMatch = line.match(/^dump:\s*(.+)$/);
+
     if (dumpMatch) {
       if (plan.dump !== undefined) plan.errors.push(`line ${i + 1}: second "dump:" line`);
       plan.dump = dumpMatch[1]!.trim();
+
       return;
     }
+
     const at = line.lastIndexOf(ARROW);
+
     if (at < 0) {
       plan.errors.push(`line ${i + 1}: expected "file -> folder", got: ${line}`);
+
       return;
     }
+
     plan.entries.push({ file: line.slice(0, at).trim(), folder: line.slice(at + ARROW.length).trim() });
   });
+
   return plan;
 }
 

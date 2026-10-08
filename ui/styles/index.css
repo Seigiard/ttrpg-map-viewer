@@ -28,6 +28,41 @@ ul {
   color: GrayText;
 }
 
+.header {
+  margin-bottom: 12px;
+}
+
+.search-input {
+  width: min(100%, 360px);
+}
+
+.search-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.search-results a {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 2px 8px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.search-thumb {
+  grid-row: span 3;
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  background: color-mix(in srgb, CanvasText 8%, Canvas);
+}
+
+.search-context {
+  color: GrayText;
+  overflow-wrap: anywhere;
+}
+
 .categories {
   display: flex;
   flex-wrap: wrap;
@@ -70,19 +105,67 @@ ul {
   color: GrayText;
 }
 
-main > .thumb {
-  max-width: 512px;
+.preview {
+  display: block;
+  width: min(100%, 2048px);
+  max-height: 80vh;
+  object-fit: contain;
+  background: color-mix(in srgb, CanvasText 8%, Canvas);
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+}
+
+.variants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.variants a {
+  display: grid;
+  gap: 4px;
+  width: 120px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.variants a.selected {
+  outline: 2px solid Highlight;
+  outline-offset: 2px;
+}
+
+.variant-thumb {
+  width: 120px;
+  height: 80px;
+  object-fit: contain;
+  background: color-mix(in srgb, CanvasText 8%, Canvas);
 }
 
 .name {
   overflow-wrap: anywhere;
 }
 
+.badges,
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+}
+
+.badge,
+.tag {
+  padding: 1px 5px;
+  border: 1px solid GrayText;
+  border-radius: 3px;
+  font-size: 0.85em;
+}
+
 .count,
 .notice {
   color: GrayText;
-}
-
-.variants {
-  margin-top: 12px;
 }

@@ -5,8 +5,12 @@ export interface Config {
   readonly filesPath: string;
   /** Root of the generated output mirror tree. */
   readonly dataPath: string;
+  /** JSON file of manually selected Covers, outside the Collection. */
+  readonly overridesPath: string;
   readonly port: number;
   readonly thumbnailConcurrency: number;
+  readonly regenerationDebounceMs: number;
+  readonly reconcileIntervalMs: number;
 }
 
 function parseIntInRange(name: string, value: string, min: number, max: number): number {
@@ -24,8 +28,11 @@ export function loadConfig(): Config {
   return {
     filesPath: process.env.FILES || "./files",
     dataPath: process.env.DATA || "./out",
+    overridesPath: process.env.OVERRIDES || "/config/overrides.json",
     port: parseIntInRange("PORT", process.env.PORT || "3000", 1, 65535),
     // A 16000×22000 original needs hundreds of MB while it decodes; keep parallel decodes low.
     thumbnailConcurrency: parseIntInRange("THUMBNAIL_CONCURRENCY", process.env.THUMBNAIL_CONCURRENCY || "2", 1, 16),
+    regenerationDebounceMs: parseIntInRange("REGENERATION_DEBOUNCE_MS", process.env.REGENERATION_DEBOUNCE_MS || "3000", 0, 60_000),
+    reconcileIntervalMs: parseIntInRange("RECONCILE_INTERVAL", process.env.RECONCILE_INTERVAL || "1800", 1, 86_400) * 1000,
   };
 }
