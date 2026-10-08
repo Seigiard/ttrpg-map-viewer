@@ -13,13 +13,15 @@ Requires Bun only; no dependencies.
 ## Usage
 
 ```sh
-bun tools/sort-dump/sort-dump.ts plan <dumpDir> [--out sort-dump.plan] [--force]
+bun tools/sort-dump/sort-dump.ts plan <dumpDir> [--out sort-dump.plan] [--force] [--one-per-file]
 bun tools/sort-dump/sort-dump.ts apply <planFile> [--dump <dumpDir>]
 ```
 
 Shorthands from the issue: `sort-dump <dumpDir>` is `plan`, `sort-dump --apply <planFile>` is `apply`.
 
 `plan` refuses to overwrite an existing plan file (it may hold your edits) unless you pass `--force`.
+
+`--one-per-file` skips name normalisation: every file gets its own map folder, named after the file without its extension. Only files that differ just by extension share a folder. Use it for packs, where `Ice Cave,  1x1_001_1.jpg` and `Ice Cave, 1x1_001_1.jpg` are different maps and variants of one map are never stored side by side.
 
 ### On the homelab host (no Bun installed)
 
@@ -74,6 +76,8 @@ City Under Attack 2 (DnDavid).jpg -> City Under Attack 2
 A single-variant map still gets its own folder.
 
 ## How file names are grouped
+
+This section describes the default mode. With `--one-per-file`, only the extension is removed, and no `# ? name extends` notes are written.
 
 Files whose normalised names are equal go into one folder. Names that are only prefixes of each other ("City Under Attack" and "City Under Attack 2") are **not** merged; the plan flags them for review.
 

@@ -140,6 +140,35 @@ describe("groupFiles notes", () => {
   });
 });
 
+describe("groupFiles one-per-file", () => {
+  test("pack files whose names differ only by spacing, commas or (N) each get their own map", () => {
+    // #given
+    const files = ["Ice Cave,  1x1_001_1.jpg", "Ice Cave, 1x1_001_1.jpg", "Tundra, 1x1_001_1 (2).jpg", "Tundra, 1x1_001_1.jpg"];
+
+    // #when
+    const groups = groupFiles(files, [], "one-per-file");
+
+    // #then
+    expect(groups.map((g) => [g.folder, g.files])).toEqual([
+      ["Ice Cave,  1x1_001_1", ["Ice Cave,  1x1_001_1.jpg"]],
+      ["Ice Cave, 1x1_001_1", ["Ice Cave, 1x1_001_1.jpg"]],
+      ["Tundra, 1x1_001_1", ["Tundra, 1x1_001_1.jpg"]],
+      ["Tundra, 1x1_001_1 (2)", ["Tundra, 1x1_001_1 (2).jpg"]],
+    ]);
+  });
+
+  test("files that differ only by extension still share a map", () => {
+    // #given
+    const files = ["Crypt, 3x2_001.jpg", "Crypt, 3x2_001.dd2vtt"];
+
+    // #when
+    const groups = groupFiles(files, [], "one-per-file");
+
+    // #then
+    expect(groups.map((g) => [g.folder, g.files])).toEqual([["Crypt, 3x2_001", ["Crypt, 3x2_001.dd2vtt", "Crypt, 3x2_001.jpg"]]]);
+  });
+});
+
 describe("plan file", () => {
   test("render then parse gives back every file -> folder pair", () => {
     const groups = groupFiles(ACHLYS);
@@ -233,6 +262,22 @@ describe("CLI", () => {
 
     expect(quiet(() => main([dump, "--out", out]))).toBe(1);
     expect(quiet(() => main([dump, "--out", out, "--force"]))).toBe(0);
+  });
+
+  test("plan --one-per-file keeps names that normalisation would merge apart", () => {
+    // #given
+    const dump = makeDump(["Lake.jpg", "Lake HD.jpg"]);
+    const out = join(makeDump([]), "p.plan");
+
+    // #when
+    const code = quiet(() => main(["plan", dump, "--out", out, "--one-per-file"]));
+
+    // #then
+    expect(code).toBe(0);
+    expect(parsePlan(readFileSync(out, "utf8")).entries).toEqual([
+      { file: "Lake.jpg", folder: "Lake" },
+      { file: "Lake HD.jpg", folder: "Lake HD" },
+    ]);
   });
 
   test("apply exits non-zero on conflict and zero when nothing is left to do", () => {
