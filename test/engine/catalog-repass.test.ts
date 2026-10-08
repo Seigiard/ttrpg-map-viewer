@@ -455,6 +455,7 @@ describe("failures", () => {
           const release = yield* Deferred.make<void>();
           const separator = String.fromCharCode(0);
           let held = false;
+          let concurrentDuringHold = 0;
 
           const session = yield* startCatalogSynchronization({
             ...sessionOptions(workspace),
@@ -464,7 +465,16 @@ describe("failures", () => {
               const hasPreview = present.has(`Empty Day.jpg${separator}preview`);
               const hasThumbnail = present.has(`Empty Day.jpg${separator}thumbnail`);
 
-              if (held || map.path !== PIT || !hasPreview || hasThumbnail) return Effect.void;
+              if (map.path !== PIT || !hasPreview) return Effect.void;
+
+              if (held) {
+                if (hasThumbnail) concurrentDuringHold += 1;
+
+                return Effect.void;
+              }
+
+              if (hasThumbnail) return Effect.void;
+
               held = true;
 
               return Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)));
@@ -487,6 +497,10 @@ describe("failures", () => {
 
             yield* Effect.sleep(10);
           }
+
+          yield* Effect.sleep(50);
+
+          expect(concurrentDuringHold).toBe(0);
 
           // #when
           yield* Deferred.succeed(release, undefined);

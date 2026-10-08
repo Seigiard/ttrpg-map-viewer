@@ -1,4 +1,4 @@
-import { constants, accessSync, lstatSync } from "node:fs";
+import { accessSync, constants, lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { ENGINE_STATE_DIRECTORY } from "../output-manifest.ts";
 
@@ -14,7 +14,8 @@ export function includeObservableCollectionSource(sourcePath: string, path: stri
     const absolute = join(sourcePath, path);
     const info = lstatSync(absolute);
 
-    accessSync(absolute, info.isDirectory() ? constants.R_OK | constants.X_OK : constants.R_OK);
+    if (info.isDirectory()) readdirSync(absolute);
+    else accessSync(absolute, constants.R_OK);
 
     return true;
   } catch {
