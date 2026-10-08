@@ -27,7 +27,8 @@ function fsEffect<A>(operation: string, path: string, run: () => Promise<A>): Ef
     const code = errnoCode(cause);
     const props = { operation, path, cause, message: `${operation} ${path} failed: ${code ?? String(cause)}` };
 
-    return code === "ENOENT" ? new FileSystemNotFound(props) : new FileSystemFailure(props);
+    // A path below a regular file is as absent as a missing one.
+    return code === "ENOENT" || code === "ENOTDIR" ? new FileSystemNotFound(props) : new FileSystemFailure(props);
   });
 }
 

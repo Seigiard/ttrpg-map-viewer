@@ -1,6 +1,6 @@
 import { isAnimatedVariant, type CategoryNode, type FileListing, type MapNode } from "./classify.ts";
 import { type VariantDimensions, variantKey } from "./metadata.ts";
-import type { CatalogPath, CategoryIndex, Cover, MapIndex, SearchIndex } from "./model.ts";
+import type { CatalogPath, CategoryIndex, Cover, MapCard, MapIndex, SearchIndex } from "./model.ts";
 
 /** Leading underscore keeps derived files apart from mirrored folder names, which come from the collection. */
 const THUMBNAIL_DIR = "_thumbnails";
@@ -83,6 +83,50 @@ export function searchIndex(maps: readonly MapNode[], hasDerivedImage: DerivedIm
         variantCount: map.variants.length,
         author: map.metadata?.author,
         tags: map.metadata?.tags,
+      }))
+      .sort((a, b) => a.path.localeCompare(b.path, "en", { sensitivity: "base" })),
+  };
+}
+
+/** A map's card as its published index states it, so category listings follow what a reader can actually open. */
+export function mapCardFromIndex(index: MapIndex): MapCard {
+  return {
+    name: index.name,
+    path: index.path,
+    variantCount: index.variants.length,
+    cover: index.cover,
+    author: index.author,
+    tags: index.tags,
+    mapSize: index.mapSize,
+  };
+}
+
+/** Lists the category's own maps that already have a published index. */
+export function categoryIndexFromPublished(category: CategoryNode, published: ReadonlyMap<CatalogPath, MapIndex>): CategoryIndex {
+  return {
+    kind: "category",
+    name: category.name,
+    path: category.path,
+    categories: category.categories.map((child) => ({ name: child.name, path: child.path })),
+    maps: category.maps.flatMap((map) => {
+      const index = published.get(map.path);
+
+      return index ? [mapCardFromIndex(index)] : [];
+    }),
+  };
+}
+
+export function searchIndexFromPublished(published: readonly MapIndex[]): SearchIndex {
+  return {
+    maps: published
+      .map((index) => ({
+        name: index.name,
+        path: index.path,
+        categoryPath: index.path.split("/").slice(0, -1),
+        thumbnail: index.cover.thumbnail,
+        variantCount: index.variants.length,
+        author: index.author,
+        tags: index.tags,
       }))
       .sort((a, b) => a.path.localeCompare(b.path, "en", { sensitivity: "base" })),
   };

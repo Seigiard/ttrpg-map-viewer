@@ -21,7 +21,7 @@ interface CzepekuVariant {
   readonly grid: string;
 }
 
-interface CzepekuEntry {
+export interface CzepekuEntry {
   readonly name: string;
   readonly type: "map" | "scene" | "None";
   readonly cats: readonly string[];
@@ -115,7 +115,7 @@ function parseCzepeku(content: string, path: string): readonly CzepekuEntry[] {
   }
 }
 
-interface MetadataListing {
+export interface MetadataListing {
   readonly czepekuPath?: string;
   readonly czepekuDirectory?: string;
   readonly folders: ReadonlyMap<string, FolderListing>;
@@ -311,7 +311,28 @@ function dungeondraftMetadata(map: MapNode, folder: FolderListing | undefined, f
   );
 }
 
+/** Pass-level metadata inputs, read once so a per-map caller does not parse the Czepeku file for every map. */
+export interface MetadataSources {
+  readonly listing: MetadataListing;
+  readonly czepeku: readonly CzepekuEntry[];
+  readonly filesPath: string;
+}
+
+export function loadMetadataSources(listing: FolderListing, filesPath: string): Effect.Effect<MetadataSources, never> {
+  const metadataListing = collectMetadataListing(listing, filesPath);
+
+  return readCzepekuMetadata(metadataListing.czepekuPath).pipe(Effect.map((czepeku) => ({ listing: metadataListing, czepeku, filesPath })));
+}
+
 /** Applies independent metadata sources in ascending precedence: filename, Czepeku, then Dungeondraft. */
+export function enrichMap(map: MapNode, sources: MetadataSources, dimensions: VariantDimensions): Effect.Effect<MapNode, never> {
+  return dungeondraftMetadata(
+    czepekuMetadata(filenameMetadata(map, dimensions), sources.czepeku, sources.listing.czepekuDirectory ?? "\u0000"),
+    sources.listing.folders.get(map.sourcePath),
+    sources.filesPath,
+  );
+}
+
 export function enrichMapMetadata(
   maps: readonly MapNode[],
   listing: FolderListing,
@@ -319,16 +340,9 @@ export function enrichMapMetadata(
   dimensions: VariantDimensions,
 ): Effect.Effect<readonly MapNode[], never> {
   return Effect.gen(function* () {
-    const metadataListing = collectMetadataListing(listing, filesPath);
-    const czepeku = yield* readCzepekuMetadata(metadataListing.czepekuPath);
+    const sources = yield* loadMetadataSources(listing, filesPath);
 
-    return yield* Effect.forEach(maps, (map) =>
-      dungeondraftMetadata(
-        czepekuMetadata(filenameMetadata(map, dimensions), czepeku, metadataListing.czepekuDirectory ?? "\u0000"),
-        metadataListing.folders.get(map.sourcePath),
-        filesPath,
-      ),
-    );
+    return yield* Effect.forEach(maps, (map) => enrichMap(map, sources, dimensions));
   });
 }
 

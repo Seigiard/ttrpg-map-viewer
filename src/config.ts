@@ -11,6 +11,8 @@ export interface Config {
   readonly thumbnailConcurrency: number;
   readonly regenerationDebounceMs: number;
   readonly reconcileIntervalMs: number;
+  /** Temporary selection of the synchronization composition during the migration to the shared engine. */
+  readonly syncEngine: boolean;
 }
 
 function parseIntInRange(name: string, value: string, min: number, max: number): number {
@@ -34,5 +36,6 @@ export function loadConfig(): Config {
     thumbnailConcurrency: parseIntInRange("THUMBNAIL_CONCURRENCY", process.env.THUMBNAIL_CONCURRENCY || "2", 1, 16),
     regenerationDebounceMs: parseIntInRange("REGENERATION_DEBOUNCE_MS", process.env.REGENERATION_DEBOUNCE_MS || "3000", 0, 60_000),
     reconcileIntervalMs: parseIntInRange("RECONCILE_INTERVAL", process.env.RECONCILE_INTERVAL || "1800", 1, 86_400) * 1000,
+    syncEngine: parseIntInRange("SYNC_ENGINE", process.env.SYNC_ENGINE || "0", 0, 1) === 1,
   };
 }

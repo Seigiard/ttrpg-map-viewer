@@ -4,7 +4,7 @@ import { isAnimatedVariant, type FileListing, type MapNode } from "./classify.ts
 import { readTextFile } from "./file-system.ts";
 import { type VariantDimensions, variantKey } from "./metadata.ts";
 
-interface CoverOverrides {
+export interface CoverOverrides {
   readonly covers: Readonly<Record<string, string>>;
 }
 
@@ -61,7 +61,7 @@ function parseOverrides(content: string, path: string): CoverOverrides {
   return { covers: {} };
 }
 
-function loadOverrides(path: string): Effect.Effect<CoverOverrides, never> {
+export function loadCoverOverrides(path: string): Effect.Effect<CoverOverrides, never> {
   return readTextFile(path).pipe(
     Effect.map((content) => parseOverrides(content, path)),
     Effect.catchTag("FileSystemNotFound", () => Effect.succeed({ covers: {} })),
@@ -87,6 +87,29 @@ function selectCover(map: MapNode, dimensions: VariantDimensions): FileListing {
     .variant;
 }
 
+export function warnUnknownCoverOverrides(maps: readonly MapNode[], overrides: CoverOverrides): void {
+  const mapPaths = new Set(maps.map((map) => map.path));
+
+  for (const [mapPath, variantName] of Object.entries(overrides.covers)) {
+    if (!mapPaths.has(mapPath)) log.warn("Generate", "Cover override references an unknown map", { path: mapPath, variant: variantName });
+  }
+}
+
+/** The override wins when it names one of the map's variants; otherwise the cover heuristic decides. */
+export function selectMapCover(map: MapNode, overrides: CoverOverrides, dimensions: VariantDimensions): MapNode {
+  const overriddenVariant = overrides.covers[map.path];
+
+  if (overriddenVariant) {
+    const cover = map.variants.find((variant) => variant.name === overriddenVariant);
+
+    if (cover) return { ...map, cover };
+
+    log.warn("Generate", "Cover override references a missing variant", { path: map.path, variant: overriddenVariant });
+  }
+
+  return { ...map, cover: selectCover(map, dimensions) };
+}
+
 /** Selects Covers after the Collection scan, including image metadata without decoding Originals. */
 export function selectMapCovers(
   maps: readonly MapNode[],
@@ -94,25 +117,9 @@ export function selectMapCovers(
   dimensions: VariantDimensions,
 ): Effect.Effect<readonly MapNode[], never> {
   return Effect.gen(function* () {
-    const overrides = yield* loadOverrides(overridesPath);
-    const mapPaths = new Set(maps.map((map) => map.path));
+    const overrides = yield* loadCoverOverrides(overridesPath);
+    warnUnknownCoverOverrides(maps, overrides);
 
-    for (const [mapPath, variantName] of Object.entries(overrides.covers)) {
-      if (!mapPaths.has(mapPath)) log.warn("Generate", "Cover override references an unknown map", { path: mapPath, variant: variantName });
-    }
-
-    return yield* Effect.forEach(maps, (map) => {
-      const overriddenVariant = overrides.covers[map.path];
-
-      if (overriddenVariant) {
-        const cover = map.variants.find((variant) => variant.name === overriddenVariant);
-
-        if (cover) return Effect.succeed({ ...map, cover });
-
-        log.warn("Generate", "Cover override references a missing variant", { path: map.path, variant: overriddenVariant });
-      }
-
-      return Effect.succeed({ ...map, cover: selectCover(map, dimensions) });
-    });
+    return maps.map((map) => selectMapCover(map, overrides, dimensions));
   });
 }

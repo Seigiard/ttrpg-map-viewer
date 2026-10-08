@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { isAbsolute, join, relative } from "node:path";
+import { join } from "node:path";
 import { log } from "../logging/index.ts";
 import {
   isAnimatedVariant,
@@ -10,28 +10,13 @@ import {
   type MapNode,
 } from "./classify.ts";
 import { selectMapCovers } from "./cover.ts";
-import {
-  mtimeOrNull,
-  readDirectory,
-  readTextFile,
-  removePath,
-  statPath,
-  type FileSystemError,
-  writeTextFileIfChanged,
-} from "./file-system.ts";
-import {
-  categoryIndex,
-  mapIndex,
-  previewPath,
-  printImagePath,
-  searchIndex,
-  thumbnailPath,
-  type DerivedImageAvailability,
-} from "./folder-index.ts";
+import { statPath, type FileSystemError, writeTextFileIfChanged } from "./file-system.ts";
+import { categoryIndex, mapIndex, previewPath, searchIndex, thumbnailPath, type DerivedImageAvailability } from "./folder-index.ts";
 import { type CatalogPath, type FolderIndex, INDEX_FILE, SEARCH_FILE } from "./model.ts";
 import { enrichMapMetadata, readVariantDimensions } from "./metadata.ts";
 import { scanCollection } from "./scan.ts";
-import { ensureDerivedImage, PREVIEW_MAX_SIZE, sourceSignature, THUMBNAIL_MAX_SIZE, type DerivedImageKind } from "./thumbnail.ts";
+import { expectedOutputManifest, pruneOrphans } from "./output-manifest.ts";
+import { ensureDerivedImage, PREVIEW_MAX_SIZE, THUMBNAIL_MAX_SIZE, type DerivedImageKind } from "./thumbnail.ts";
 
 export interface GenerationOptions {
   readonly filesPath: string;
@@ -117,115 +102,6 @@ function writeIndex(dataPath: string, index: FolderIndex): Effect.Effect<void, F
 
 function writeSearchIndex(dataPath: string, content: string): Effect.Effect<void, FileSystemError> {
   return writeTextFileIfChanged(join(dataPath, SEARCH_FILE), content);
-}
-
-interface OutputManifest {
-  readonly paths: ReadonlySet<string>;
-  readonly directories: ReadonlySet<string>;
-}
-
-function expectedOutputManifest(
-  categories: readonly CategoryNode[],
-  maps: readonly MapNode[],
-  dataPath: string,
-  overridesPath: string,
-): Effect.Effect<OutputManifest, FileSystemError> {
-  const paths = new Set([
-    SEARCH_FILE,
-    ...categories.map((category) => join(category.path, INDEX_FILE)),
-    ...maps.flatMap((map) => [
-      join(map.path, INDEX_FILE),
-      ...map.variants.flatMap((variant) => [
-        previewPath(map.path, variant.name),
-        `${previewPath(map.path, variant.name)}.source.json`,
-        thumbnailPath(map.path, variant.name),
-        `${thumbnailPath(map.path, variant.name)}.source.json`,
-      ]),
-    ]),
-  ]);
-
-  const overridesRelativePath = relative(dataPath, overridesPath);
-
-  if (overridesRelativePath !== "" && !isAbsolute(overridesRelativePath) && !overridesRelativePath.startsWith("..")) {
-    paths.add(overridesRelativePath);
-  }
-
-  return Effect.forEach(
-    maps.flatMap((map) =>
-      map.variants
-        .filter((variant) => !isAnimatedVariant(variant.name))
-        .map((variant) => ({ variant, path: printImagePath(map.path, variant.name) })),
-    ),
-    ({ variant, path }) => {
-      const destination = join(dataPath, path);
-      const signature = sourceSignature(variant.mtimeMs, variant.size);
-
-      return Effect.all([
-        mtimeOrNull(destination),
-        readTextFile(`${destination}.source.json`).pipe(Effect.catchTag("FileSystemNotFound", () => Effect.succeed(null))),
-      ]).pipe(
-        Effect.map(([imageMtime, storedSignature]) =>
-          imageMtime !== null && storedSignature === signature ? [path, `${path}.source.json`] : [],
-        ),
-      );
-    },
-    { concurrency: INDEX_WRITE_CONCURRENCY },
-  ).pipe(
-    Effect.map((printPaths) => {
-      for (const path of printPaths.flat()) paths.add(path);
-      const directories = new Set<string>();
-
-      for (const map of maps) directories.add(join(map.path, "_print"));
-
-      for (const path of paths) {
-        for (let slash = path.indexOf("/"); slash !== -1; slash = path.indexOf("/", slash + 1)) {
-          directories.add(path.slice(0, slash));
-        }
-      }
-
-      return { paths, directories };
-    }),
-  );
-}
-
-function pruneOrphans(
-  dataPath: string,
-  manifest: OutputManifest,
-  passStartedAt: number,
-  relativePath = "",
-): Effect.Effect<void, FileSystemError> {
-  const absolutePath = join(dataPath, relativePath);
-
-  return Effect.gen(function* () {
-    const entries = yield* readDirectory(absolutePath);
-
-    yield* Effect.forEach(
-      entries,
-      (entry) => {
-        const childPath = relativePath === "" ? entry.name : `${relativePath}/${entry.name}`;
-        const childAbsolutePath = join(dataPath, childPath);
-
-        if (entry.isDirectory()) {
-          const hasExpectedChild = manifest.directories.has(childPath);
-
-          return hasExpectedChild ? pruneOrphans(dataPath, manifest, passStartedAt, childPath) : removePath(childAbsolutePath);
-        }
-
-        if (manifest.paths.has(childPath)) return Effect.void;
-
-        const isPrintFile = childPath.includes("/_print/");
-
-        if (!isPrintFile) return removePath(childAbsolutePath);
-
-        return mtimeOrNull(childAbsolutePath).pipe(
-          Effect.flatMap((mtime) =>
-            childPath.includes(".tmp") || (mtime !== null && mtime > passStartedAt) ? Effect.void : removePath(childAbsolutePath),
-          ),
-        );
-      },
-      { concurrency: INDEX_WRITE_CONCURRENCY, discard: true },
-    );
-  });
 }
 
 function derivedImageKey(map: MapNode, variant: FileListing, kind: DerivedImageKind): string {
