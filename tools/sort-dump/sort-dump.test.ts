@@ -75,6 +75,11 @@ describe("normalise", () => {
     expect(stripExtensions("Map.png")).toBe("Map");
   });
 
+  test("a parenthesised number inside a name stays distinct from a bare one", () => {
+    expect(normalise("Dungeon, 4x1 (2)_001.jpg").key).not.toBe(normalise("Dungeon, 4x1_2_001.jpg").key);
+    expect(normalise("Dungeon, 4x1 (2)_001.jpg").key).toBe(normalise("Dungeon, 4x1 (2)_001 Grid.jpg").key);
+  });
+
   test("running numbers in parentheses are not taken as authors", () => {
     expect(authorsIn("City Under Attack (2).jpg")).toEqual([]);
     expect(authorsIn("City Under Attack (DnDavid).jpg")).toEqual(["DnDavid"]);
