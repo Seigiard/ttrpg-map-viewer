@@ -2,6 +2,10 @@
 
 Static web catalog for a homelab collection of TTRPG battle maps: thumbnails, previews, downloads, and print slicing via Planar.
 
+## Image
+
+CI publishes `ghcr.io/seigiard/ttrpg-map-viewer` on every push to `main` (`latest` and the short commit SHA) and on `v*` tags. Mount the collection read-only at `/maps` and a writable directory at `/data`; nginx listens on port 80.
+
 ## Configuration
 
 - `FILES`: read-only Collection root. Default: `./files`.
