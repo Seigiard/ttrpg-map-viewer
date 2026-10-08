@@ -7,6 +7,8 @@ const ORIGINAL_PREFIX = "/_original";
 
 const DOWNLOAD_PREFIX = "/_download";
 
+const PLANAR_PREFIX = "/_planar";
+
 function encodePath(path: CatalogPath): string {
   return path.split("/").map(encodeURIComponent).join("/");
 }
@@ -37,6 +39,10 @@ export function downloadUrl(mapPath: CatalogPath, file: string): string {
 
 export function mapZipUrl(path: CatalogPath): string {
   return `/api/map-zip?path=${encodeURIComponent(path)}`;
+}
+
+export function sliceUrl(original: string): string {
+  return `${PLANAR_PREFIX}/?src=${encodeURIComponent(original)}`;
 }
 
 /** Inverse of folderUrl: the browser hands over a percent-encoded pathname. */

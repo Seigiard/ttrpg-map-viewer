@@ -1,0 +1,87 @@
+diff --git a/app/page.tsx b/app/page.tsx
+index 7ca80e7..f9c58f3 100644
+--- a/app/page.tsx
++++ b/app/page.tsx
+@@ -879,20 +879,7 @@ export default function PlanarApp() {
+             }
+           }
+ 
+-          if (url.startsWith("data:")) {
+-            const mimeType = url.substring(5, url.indexOf(";")) || "image/jpeg";
+-            addImageFromDataUrl(url, name, mimeType);
+-          } else {
+-            try {
+-              const res = await fetch(url);
+-              const blob = await res.blob();
+-              const dataUrl = await blobToDataUrl(blob);
+-              addImageFromDataUrl(dataUrl, name, blob.type || "image/jpeg");
+-            } catch (err) {
+-              console.warn("Failed to fetch image directly (CORS). Falling back to URL source.", err);
+-              addImageFromDataUrl(url, name, "image/jpeg");
+-            }
+-          }
++          await loadImageFromUrl(url, name);
+         }
+       }
+     };
+@@ -931,14 +918,7 @@ export default function PlanarApp() {
+       const text = e.clipboardData.getData("text/plain").trim();
+       if (text && /^https?:\/\/\S+\.(jpe?g|png|gif|webp|avif|bmp|svg|heic|heif|tiff?)(\?\S*)?$/i.test(text)) {
+         e.preventDefault();
+-        try {
+-          const res = await fetch(text);
+-          const blob = await res.blob();
+-          const dataUrl = await blobToDataUrl(blob);
+-          addImageFromDataUrl(dataUrl, text.split("/").pop() || "pasted-image", blob.type || "image/png");
+-        } catch (err) {
+-          console.error("Failed to import pasted image URL:", err);
+-        }
++        await loadImageFromUrl(text, text.split("/").pop() || "pasted-image");
+       }
+     };
+ 
+@@ -1218,6 +1198,32 @@ export default function PlanarApp() {
+     img.src = dataUrl;
+   };
+ 
++  const loadImageFromUrl = async (url: string, name: string) => {
++    if (url.startsWith("data:")) {
++      const mimeType = url.substring(5, url.indexOf(";")) || "image/jpeg";
++      addImageFromDataUrl(url, name, mimeType);
++      return;
++    }
++
++    try {
++      const res = await fetch(url);
++      const blob = await res.blob();
++      const dataUrl = await blobToDataUrl(blob);
++      addImageFromDataUrl(dataUrl, name, blob.type || "image/jpeg");
++    } catch (err) {
++      console.warn("Failed to fetch image directly (CORS). Falling back to URL source.", err);
++      addImageFromDataUrl(url, name, "image/jpeg");
++    }
++  };
++
++  useEffect(() => {
++    const src = new URLSearchParams(window.location.search).get("src");
++    if (!src) return;
++
++    const name = new URL(src, window.location.href).pathname.split("/").pop() || "imported-image";
++    void loadImageFromUrl(src, name);
++  }, []);
++
+   // Load one of the bundled example images (served from /public/examples).
+   const loadExampleImage = async (fileName: string) => {
+     try {
+diff --git a/next.config.js b/next.config.js
+index 91ef62f..6c986f3 100644
+--- a/next.config.js
++++ b/next.config.js
+@@ -1,5 +1,7 @@
+ /** @type {import('next').NextConfig} */
+ const nextConfig = {
++  output: "export",
++  basePath: "/_planar",
+   reactStrictMode: true,
+ };
+ 

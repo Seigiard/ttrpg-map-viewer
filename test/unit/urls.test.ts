@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { downloadUrl, folderUrl, indexUrl, mapZipUrl, originalUrl, pathFromLocation, searchIndexUrl } from "../../ui/app/urls.ts";
+import { downloadUrl, folderUrl, indexUrl, mapZipUrl, originalUrl, pathFromLocation, searchIndexUrl, sliceUrl } from "../../ui/app/urls.ts";
 
 describe("SPA URLs mirror folder paths", () => {
   test("a folder URL round-trips through the browser pathname, including spaces, # and non-ASCII names", () => {
@@ -19,5 +19,16 @@ describe("SPA URLs mirror folder paths", () => {
     expect(downloadUrl("Pack 09/Ruins", "Day #2.png")).toBe("/_download/Pack%2009/Ruins/Day%20%232.png");
     expect(mapZipUrl("Pack 09/Ruins")).toBe("/api/map-zip?path=Pack%2009%2FRuins");
     expect(searchIndexUrl()).toBe("/_catalog/search.json");
+  });
+
+  test("a still variant opens its Original in self-hosted Planar", () => {
+    // #given
+    const original = "/_original/Pack%2009/Ruins/Day%20%232.png";
+
+    // #when
+    const result = sliceUrl(original);
+
+    // #then
+    expect(result).toBe("/_planar/?src=%2F_original%2FPack%252009%2FRuins%2FDay%2520%25232.png");
   });
 });

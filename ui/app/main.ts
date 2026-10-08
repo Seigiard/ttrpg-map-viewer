@@ -10,7 +10,17 @@ import type {
   Variant,
 } from "../../src/catalog/model.ts";
 import { filterSearchMaps } from "./search.ts";
-import { catalogFileUrl, downloadUrl, folderUrl, indexUrl, mapZipUrl, originalUrl, pathFromLocation, searchIndexUrl } from "./urls.ts";
+import {
+  catalogFileUrl,
+  downloadUrl,
+  folderUrl,
+  indexUrl,
+  mapZipUrl,
+  originalUrl,
+  pathFromLocation,
+  searchIndexUrl,
+  sliceUrl,
+} from "./urls.ts";
 
 const ROOT_TITLE = "Catalog";
 
@@ -262,6 +272,12 @@ function renderMap(index: MapIndex): HTMLElement[] {
       " ",
       element("a", { href: downloadUrl(index.originalPath, selected.file) }, "Download"),
       " ",
+      ...(!selected.animated
+        ? [
+            element("a", { href: sliceUrl(originalUrl(index.originalPath, selected.file)), target: "_blank", rel: "noreferrer" }, "Slice"),
+            " ",
+          ]
+        : []),
       element("a", { href: mapZipUrl(index.path) }, "Download all"),
     ),
     element(
