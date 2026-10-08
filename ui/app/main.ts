@@ -11,6 +11,7 @@ import type {
 } from "../../src/catalog/model.ts";
 import { filterSearchMaps } from "./search.ts";
 import {
+  breadcrumbTrail,
   catalogFileUrl,
   downloadUrl,
   folderUrl,
@@ -18,11 +19,10 @@ import {
   mapZipUrl,
   originalUrl,
   pathFromLocation,
+  ROOT_LABEL,
   searchIndexUrl,
   sliceUrl,
 } from "./urls.ts";
-
-const ROOT_TITLE = "Catalog";
 
 type Child = Node | string;
 
@@ -45,7 +45,7 @@ function navLink(path: CatalogPath, ...children: Child[]): HTMLAnchorElement {
 }
 
 function displayName(name: string): string {
-  return name === "" ? ROOT_TITLE : name;
+  return name === "" ? ROOT_LABEL : name;
 }
 
 function stripExtension(file: string): string {
@@ -65,12 +65,10 @@ function metadataBadges(metadata: Pick<MapMetadata, "author" | "mapSize">): HTML
 }
 
 function breadcrumbs(path: CatalogPath): HTMLElement {
-  const nav = element("nav", { className: "breadcrumbs" }, navLink("", ROOT_TITLE));
-  const segments = path === "" ? [] : path.split("/");
+  const [root, ...rest] = breadcrumbTrail(path);
+  const nav = element("nav", { className: "breadcrumbs" }, navLink(root.path, root.label));
 
-  segments.forEach((segment, index) => {
-    nav.append(" / ", navLink(segments.slice(0, index + 1).join("/"), segment));
-  });
+  for (const crumb of rest) nav.append(" / ", navLink(crumb.path, crumb.label));
 
   return nav;
 }
@@ -333,14 +331,14 @@ async function render(): Promise<void> {
     const message =
       load.status === 404 && path === "" ? "The catalog is being generated. Reload in a moment." : `Not found (${load.status}).`;
 
-    document.title = ROOT_TITLE;
+    document.title = ROOT_LABEL;
     app.replaceChildren(searchHeader(), breadcrumbs(path), element("p", { className: "notice" }, message));
 
     return;
   }
 
   const { index } = load;
-  document.title = path === "" ? ROOT_TITLE : `${index.name} · ${ROOT_TITLE}`;
+  document.title = path === "" ? ROOT_LABEL : `${index.name} · ${ROOT_LABEL}`;
 
   app.replaceChildren(
     searchHeader(),

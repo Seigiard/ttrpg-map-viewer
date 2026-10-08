@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { downloadUrl, folderUrl, indexUrl, mapZipUrl, originalUrl, pathFromLocation, searchIndexUrl, sliceUrl } from "../../ui/app/urls.ts";
+import {
+  breadcrumbTrail,
+  downloadUrl,
+  folderUrl,
+  indexUrl,
+  mapZipUrl,
+  originalUrl,
+  pathFromLocation,
+  searchIndexUrl,
+  sliceUrl,
+} from "../../ui/app/urls.ts";
 
 describe("SPA URLs mirror folder paths", () => {
   test("a folder URL round-trips through the browser pathname, including spaces, # and non-ASCII names", () => {
@@ -65,5 +75,29 @@ describe("SPA URLs mirror folder paths", () => {
     expect(result).toBe(
       "/_planar/?src=%2Fapi%2Fprint-image%3Fpath%3DPack%252009%252FRuins%26variant%3DDay%2520%25232.png&ppc=54.54545454545454&cell=1in",
     );
+  });
+
+  test("a mixed folder's loose map ends its breadcrumbs at the category and the map name, without the internal segment", () => {
+    // #when
+    const trail = breadcrumbTrail("battlemaps/._loose");
+
+    // #then
+    expect(trail).toEqual([
+      { path: "", label: "Catalog" },
+      { path: "battlemaps", label: "battlemaps" },
+      { path: "battlemaps/._loose", label: "battlemaps" },
+    ]);
+  });
+
+  test("ordinary paths get one breadcrumb per folder", () => {
+    // #when
+    const trail = breadcrumbTrail("Pack 09/Ruins");
+
+    // #then
+    expect(trail).toEqual([
+      { path: "", label: "Catalog" },
+      { path: "Pack 09", label: "Pack 09" },
+      { path: "Pack 09/Ruins", label: "Ruins" },
+    ]);
   });
 });

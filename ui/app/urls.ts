@@ -1,4 +1,4 @@
-import { PRINT_IMAGE_MAX_SIZE, type CatalogPath, type Variant } from "../../src/catalog/model.ts";
+import { LOOSE_MAP_SEGMENT, PRINT_IMAGE_MAX_SIZE, type CatalogPath, type Variant } from "../../src/catalog/model.ts";
 
 // These prefixes must match the locations in nginx.conf.template.
 const CATALOG_PREFIX = "/_catalog";
@@ -62,4 +62,24 @@ export function pathFromLocation(pathname: string): CatalogPath {
     .filter((segment) => segment !== "")
     .map(decodeURIComponent)
     .join("/");
+}
+
+export interface Breadcrumb {
+  readonly path: CatalogPath;
+  readonly label: string;
+}
+
+export const ROOT_LABEL = "Catalog";
+
+export function breadcrumbTrail(path: CatalogPath): readonly [Breadcrumb, ...Breadcrumb[]] {
+  const segments = path === "" ? [] : path.split("/");
+
+  return [
+    { path: "", label: ROOT_LABEL },
+    ...segments.map((segment, index) => ({
+      path: segments.slice(0, index + 1).join("/"),
+      // A loose map is named after the mixed folder it belongs to, so it shows that name instead of its internal segment.
+      label: segment === LOOSE_MAP_SEGMENT ? (segments[index - 1] ?? ROOT_LABEL) : segment,
+    })),
+  ];
 }

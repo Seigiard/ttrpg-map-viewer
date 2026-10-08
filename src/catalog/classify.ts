@@ -1,11 +1,8 @@
-import type { CatalogPath, MapMetadata, VariantMetadata } from "./model.ts";
+import { type CatalogPath, LOOSE_MAP_SEGMENT, type MapMetadata, type VariantMetadata } from "./model.ts";
 
 const VARIANT_EXTENSIONS: ReadonlySet<string> = new Set(["webp", "jpg", "jpeg", "png", "webm", "mp4"]);
 
 const ANIMATED_VARIANT_EXTENSIONS: ReadonlySet<string> = new Set(["webm", "mp4"]);
-
-// Hidden collection folders are ignored, so this output-only segment cannot clash with a catalogued child folder.
-const LOOSE_MAP_SEGMENT = "._loose";
 
 export interface FileListing {
   readonly name: string;

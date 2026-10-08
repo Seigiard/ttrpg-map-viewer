@@ -11,6 +11,12 @@ export const PRINT_IMAGE_MAX_SIZE = 12_000;
 /** Paths are collection-relative, "/"-joined, without leading or trailing slash; the collection root is "". */
 export type CatalogPath = string;
 
+/**
+ * Last catalog-path segment of the extra map holding a mixed folder's own variants. Hidden collection folders are never
+ * scanned, so it cannot clash with a catalogued child folder.
+ */
+export const LOOSE_MAP_SEGMENT = "._loose";
+
 /** Map extent in grid cells. */
 export interface MapSize {
   readonly width: number;
