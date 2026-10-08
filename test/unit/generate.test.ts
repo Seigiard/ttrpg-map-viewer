@@ -8,6 +8,7 @@ import sharp from "sharp";
 import { generateCatalog, type GenerationSummary } from "../../src/catalog/generate.ts";
 import { RegenerationController } from "../../src/catalog/regeneration.ts";
 import type { CategoryIndex, MapIndex, SearchIndex } from "../../src/catalog/model.ts";
+import { printImageResponse } from "../../src/print-image.ts";
 
 const TINY = 64;
 
@@ -430,6 +431,8 @@ describe("generateCatalog", () => {
           {
             file: "Day.jpg",
             size: looseVariantSize,
+            width: TINY,
+            height: TINY,
             animated: false,
             thumbnail: "Mixed/._loose/_thumbnails/Day.jpg.webp",
             preview: "Mixed/._loose/_previews/Day.jpg.webp",
@@ -542,6 +545,23 @@ describe("generateCatalog", () => {
     expect((await sharp(preview).metadata()).format).toBe("webp");
   });
 
+  test("prunes a cached Print image when its Original changes", async () => {
+    // #given
+    const original = join(collection, "Pack 09", "Ancient Ruins", "Ruins_BaseDayGL.png");
+    const print = join(output, "Pack 09", "Ancient Ruins", "_print", "Ruins_BaseDayGL.png.jpg");
+    await printImageResponse(new Request("http://catalog/api/print-image?path=Pack%2009%2FAncient%20Ruins&variant=Ruins_BaseDayGL.png"), {
+      filesPath: collection,
+      dataPath: output,
+    });
+    await writeFile(original, await readFile(original));
+
+    // #when
+    await generate();
+
+    // #then
+    expect(await Promise.all([Bun.file(print).exists(), Bun.file(`${print}.source.json`).exists()])).toEqual([false, false]);
+  });
+
   test("enriches DnDavid names and Dungeondraft exports without adding metadata to unrelated Maps", async () => {
     // #given
     await image(join(collection, "DnDavid", "Village Square", "Village Square Grid [40x30] (DnDavid).jpg"), 4_001, 3_000, "jpeg");
@@ -578,6 +598,8 @@ describe("generateCatalog", () => {
         {
           file: "Ruins_BaseDayGL.png",
           size: expect.any(Number),
+          width: TINY,
+          height: TINY,
           animated: false,
           thumbnail: "Pack 09/Ancient Ruins/_thumbnails/Ruins_BaseDayGL.png.webp",
           preview: "Pack 09/Ancient Ruins/_previews/Ruins_BaseDayGL.png.webp",

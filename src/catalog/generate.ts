@@ -10,12 +10,28 @@ import {
   type MapNode,
 } from "./classify.ts";
 import { selectMapCovers } from "./cover.ts";
-import { readDirectory, removePath, statPath, type FileSystemError, writeTextFileIfChanged } from "./file-system.ts";
-import { categoryIndex, mapIndex, previewPath, searchIndex, thumbnailPath, type DerivedImageAvailability } from "./folder-index.ts";
+import {
+  mtimeOrNull,
+  readDirectory,
+  readTextFile,
+  removePath,
+  statPath,
+  type FileSystemError,
+  writeTextFileIfChanged,
+} from "./file-system.ts";
+import {
+  categoryIndex,
+  mapIndex,
+  previewPath,
+  printImagePath,
+  searchIndex,
+  thumbnailPath,
+  type DerivedImageAvailability,
+} from "./folder-index.ts";
 import { type CatalogPath, type FolderIndex, INDEX_FILE, SEARCH_FILE } from "./model.ts";
 import { enrichMapMetadata, readVariantDimensions } from "./metadata.ts";
 import { scanCollection } from "./scan.ts";
-import { ensureDerivedImage, PREVIEW_MAX_SIZE, THUMBNAIL_MAX_SIZE, type DerivedImageKind } from "./thumbnail.ts";
+import { ensureDerivedImage, PREVIEW_MAX_SIZE, sourceSignature, THUMBNAIL_MAX_SIZE, type DerivedImageKind } from "./thumbnail.ts";
 
 export interface GenerationOptions {
   readonly filesPath: string;
@@ -108,7 +124,11 @@ interface OutputManifest {
   readonly directories: ReadonlySet<string>;
 }
 
-function expectedOutputManifest(categories: readonly CategoryNode[], maps: readonly MapNode[]): OutputManifest {
+function expectedOutputManifest(
+  categories: readonly CategoryNode[],
+  maps: readonly MapNode[],
+  dataPath: string,
+): Effect.Effect<OutputManifest, FileSystemError> {
   const paths = new Set([
     SEARCH_FILE,
     ...categories.map((category) => join(category.path, INDEX_FILE)),
@@ -123,15 +143,40 @@ function expectedOutputManifest(categories: readonly CategoryNode[], maps: reado
     ]),
   ]);
 
-  const directories = new Set<string>();
+  return Effect.forEach(
+    maps.flatMap((map) =>
+      map.variants
+        .filter((variant) => !isAnimatedVariant(variant.name))
+        .map((variant) => ({ variant, path: printImagePath(map.path, variant.name) })),
+    ),
+    ({ variant, path }) => {
+      const destination = join(dataPath, path);
+      const signature = sourceSignature(variant.mtimeMs, variant.size);
 
-  for (const path of paths) {
-    for (let slash = path.indexOf("/"); slash !== -1; slash = path.indexOf("/", slash + 1)) {
-      directories.add(path.slice(0, slash));
-    }
-  }
+      return Effect.all([
+        mtimeOrNull(destination),
+        readTextFile(`${destination}.source.json`).pipe(Effect.catchTag("FileSystemNotFound", () => Effect.succeed(null))),
+      ]).pipe(
+        Effect.map(([imageMtime, storedSignature]) =>
+          imageMtime !== null && storedSignature === signature ? [path, `${path}.source.json`] : [],
+        ),
+      );
+    },
+    { concurrency: INDEX_WRITE_CONCURRENCY },
+  ).pipe(
+    Effect.map((printPaths) => {
+      for (const path of printPaths.flat()) paths.add(path);
+      const directories = new Set<string>();
 
-  return { paths, directories };
+      for (const path of paths) {
+        for (let slash = path.indexOf("/"); slash !== -1; slash = path.indexOf("/", slash + 1)) {
+          directories.add(path.slice(0, slash));
+        }
+      }
+
+      return { paths, directories };
+    }),
+  );
 }
 
 function pruneOrphans(dataPath: string, manifest: OutputManifest, relativePath = ""): Effect.Effect<void, FileSystemError> {
@@ -191,7 +236,10 @@ export function generateCatalog(options: GenerationOptions): Effect.Effect<Gener
 
     const writeAllIndexes = () =>
       Effect.forEach(
-        [...categories.map((category) => categoryIndex(category, hasDerivedImage)), ...maps.map((map) => mapIndex(map, hasDerivedImage))],
+        [
+          ...categories.map((category) => categoryIndex(category, hasDerivedImage)),
+          ...maps.map((map) => mapIndex(map, hasDerivedImage, dimensions)),
+        ],
         (index) => writeIndex(options.dataPath, index),
         { concurrency: INDEX_WRITE_CONCURRENCY, discard: true },
       );
@@ -285,7 +333,10 @@ export function generateCatalog(options: GenerationOptions): Effect.Effect<Gener
 
     // An empty scan usually means the collection's mount is missing; pruning then would throw away hours of derived images.
     if (maps.length === 0) log.warn("Generate", "Collection has no maps; keeping existing catalog output", { files: options.filesPath });
-    else yield* pruneOrphans(options.dataPath, expectedOutputManifest(categories, maps));
+    else
+      yield* expectedOutputManifest(categories, maps, options.dataPath).pipe(
+        Effect.andThen((manifest) => pruneOrphans(options.dataPath, manifest)),
+      );
 
     return {
       categories: categories.length,

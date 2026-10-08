@@ -274,7 +274,11 @@ function renderMap(index: MapIndex): HTMLElement[] {
       " ",
       ...(!selected.animated
         ? [
-            element("a", { href: sliceUrl(originalUrl(index.originalPath, selected.file)), target: "_blank", rel: "noreferrer" }, "Slice"),
+            element(
+              "a",
+              { href: sliceUrl(index.path, originalUrl(index.originalPath, selected.file), selected), target: "_blank", rel: "noreferrer" },
+              "Slice",
+            ),
             " ",
           ]
         : []),

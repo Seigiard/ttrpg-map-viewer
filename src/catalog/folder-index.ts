@@ -1,4 +1,5 @@
 import { isAnimatedVariant, type CategoryNode, type FileListing, type MapNode } from "./classify.ts";
+import type { VariantDimensions } from "./metadata.ts";
 import type { CatalogPath, CategoryIndex, Cover, MapIndex, SearchIndex } from "./model.ts";
 
 /** Leading underscore keeps derived files apart from mirrored folder names, which come from the collection. */
@@ -14,6 +15,11 @@ export function thumbnailPath(mapPath: CatalogPath, variantFile: string): Catalo
 /** The full original file name is kept so `a.jpg` and `a.png` in one map never share a preview. */
 export function previewPath(mapPath: CatalogPath, variantFile: string): CatalogPath {
   return `${mapPath}/${PREVIEW_DIR}/${variantFile}.webp`;
+}
+
+/** Print images use JPEG to reduce the client-side canvas decode and transfer cost. */
+export function printImagePath(mapPath: CatalogPath, variantFile: string): CatalogPath {
+  return `${mapPath}/_print/${variantFile}.jpg`;
 }
 
 /** Answers whether a derived image exists in the output tree. */
@@ -42,7 +48,7 @@ export function categoryIndex(category: CategoryNode, hasDerivedImage: DerivedIm
   };
 }
 
-export function mapIndex(map: MapNode, hasDerivedImage: DerivedImageAvailability): MapIndex {
+export function mapIndex(map: MapNode, hasDerivedImage: DerivedImageAvailability, dimensions: VariantDimensions): MapIndex {
   return {
     kind: "map",
     name: map.name,
@@ -50,14 +56,19 @@ export function mapIndex(map: MapNode, hasDerivedImage: DerivedImageAvailability
     originalPath: map.sourcePath,
     cover: coverOf(map, hasDerivedImage),
     ...map.metadata,
-    variants: map.variants.map((variant) => ({
-      file: variant.name,
-      size: variant.size,
-      animated: isAnimatedVariant(variant.name),
-      thumbnail: hasDerivedImage(map, variant, "thumbnail") ? thumbnailPath(map.path, variant.name) : null,
-      preview: hasDerivedImage(map, variant, "preview") ? previewPath(map.path, variant.name) : null,
-      ...variant.metadata,
-    })),
+    variants: map.variants.map((variant) => {
+      const dimensionsForVariant = dimensions.get(`${map.sourcePath}\u0000${variant.name}`);
+
+      return {
+        file: variant.name,
+        size: variant.size,
+        ...dimensionsForVariant,
+        animated: isAnimatedVariant(variant.name),
+        thumbnail: hasDerivedImage(map, variant, "thumbnail") ? thumbnailPath(map.path, variant.name) : null,
+        preview: hasDerivedImage(map, variant, "preview") ? previewPath(map.path, variant.name) : null,
+        ...variant.metadata,
+      };
+    }),
   };
 }
 

@@ -22,7 +22,7 @@ export class DerivedImageFailure extends Data.TaggedError("DerivedImageFailure")
 
 export type DerivedImageOutcome = "created" | "fresh";
 
-function sourceSignature(mtimeMs: number, size: number): string {
+export function sourceSignature(mtimeMs: number, size: number): string {
   return JSON.stringify({ mtimeMs, size });
 }
 

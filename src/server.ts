@@ -4,6 +4,7 @@ import { RegenerationController } from "./catalog/regeneration.ts";
 import { loadConfig } from "./config.ts";
 import { log } from "./logging/index.ts";
 import { mapZipResponse } from "./map-zip.ts";
+import { printImageResponse } from "./print-image.ts";
 
 const config = loadConfig();
 
@@ -35,6 +36,8 @@ const server = Bun.serve({
     }
 
     if (url.pathname === "/api/map-zip") return mapZipResponse(req, config);
+
+    if (url.pathname === "/api/print-image") return printImageResponse(req, config);
 
     if (url.pathname.startsWith("/api/")) return Response.json({ error: "Not implemented" }, { status: 501 });
 

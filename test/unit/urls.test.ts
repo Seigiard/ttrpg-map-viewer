@@ -21,14 +21,49 @@ describe("SPA URLs mirror folder paths", () => {
     expect(searchIndexUrl()).toBe("/_catalog/search.json");
   });
 
-  test("a still variant opens its Original in self-hosted Planar", () => {
+  test("a grid-scaled Variant opens its Original calibrated to one inch cells", () => {
     // #given
     const original = "/_original/Pack%2009/Ruins/Day%20%232.png";
 
+    const variant = {
+      file: "Day #2.png",
+      size: 1,
+      width: 10_000,
+      height: 5_000,
+      animated: false,
+      thumbnail: null,
+      preview: null,
+      gridScale: 100,
+    };
+
     // #when
-    const result = sliceUrl(original);
+    const result = sliceUrl("Pack 09/Ruins", original, variant);
 
     // #then
-    expect(result).toBe("/_planar/?src=%2F_original%2FPack%252009%2FRuins%2FDay%2520%25232.png");
+    expect(result).toBe("/_planar/?src=%2F_original%2FPack%252009%2FRuins%2FDay%2520%25232.png&ppc=100&cell=1in");
+  });
+
+  test("a huge Variant opens its cached Print image with a proportionally scaled grid", () => {
+    // #given
+    const original = "/_original/Pack%2009/Ruins/Day%20%232.png";
+
+    const variant = {
+      file: "Day #2.png",
+      size: 1,
+      width: 16_000,
+      height: 22_000,
+      animated: false,
+      thumbnail: null,
+      preview: null,
+      gridScale: 100,
+    };
+
+    // #when
+    const result = sliceUrl("Pack 09/Ruins", original, variant);
+
+    // #then
+    expect(result).toBe(
+      "/_planar/?src=%2Fapi%2Fprint-image%3Fpath%3DPack%252009%252FRuins%26variant%3DDay%2520%25232.png&ppc=54.54545454545454&cell=1in",
+    );
   });
 });

@@ -5,6 +5,9 @@ export const INDEX_FILE = "index.json";
 /** Global, compact data for client-side Map search. */
 export const SEARCH_FILE = "search.json";
 
+/** Largest image side that Planar may load into a browser canvas. */
+export const PRINT_IMAGE_MAX_SIZE = 12_000;
+
 /** Paths are collection-relative, "/"-joined, without leading or trailing slash; the collection root is "". */
 export type CatalogPath = string;
 
@@ -64,6 +67,10 @@ export interface Variant extends VariantMetadata {
   /** File name in the map folder; the original lives at the map path plus this name. */
   readonly file: string;
   readonly size: number;
+  /** Pixel width of the Original, when its image header could be read. */
+  readonly width?: number;
+  /** Pixel height of the Original, when its image header could be read. */
+  readonly height?: number;
   /** Whether the original is a video loop instead of a still image. */
   readonly animated: boolean;
   /** Output-tree-relative path of the variant's thumbnail; null when it could not be made. */

@@ -1,34 +1,14 @@
 import { downloadZip } from "client-zip";
-import { open, readFile, realpath, type FileHandle } from "node:fs/promises";
-import { relative, resolve, sep } from "node:path";
-import type { MapIndex } from "./catalog/model.ts";
+import { open, type FileHandle } from "node:fs/promises";
+import { isCatalogPath, readMapIndex, resolveOriginal, type CatalogStorage } from "./catalog/map-index.ts";
 
-interface MapZipConfig {
-  readonly filesPath: string;
-  readonly dataPath: string;
-}
+type MapZipConfig = CatalogStorage;
 
 interface OriginalFile {
   readonly file: string;
   readonly handle: FileHandle;
   readonly size: number;
   readonly lastModified: Date;
-}
-
-function isCatalogPath(path: string, allowRoot = false): boolean {
-  if (path === "") return allowRoot;
-
-  return path.split("/").every((segment) => segment !== "" && segment !== "." && segment !== "..");
-}
-
-function isVariantFile(file: string): boolean {
-  return file !== "" && file !== "." && file !== ".." && !file.includes("/") && !file.includes("\\");
-}
-
-function isInside(root: string, path: string): boolean {
-  const pathFromRoot = relative(root, path);
-
-  return pathFromRoot === "" || (!pathFromRoot.startsWith(`..${sep}`) && pathFromRoot !== "..");
 }
 
 function zipFileName(mapName: string): string {
@@ -85,37 +65,21 @@ export async function mapZipResponse(request: Request, config: MapZipConfig): Pr
 
   if (request.method !== "GET" || path === null || !isCatalogPath(path)) return new Response("Bad request", { status: 400 });
 
-  let index: MapIndex;
+  const index = await readMapIndex(config.dataPath, path);
 
-  try {
-    // SAFETY: index.json is generated against the MapIndex contract; these checks reject a non-Map or invalid paths.
-    index = JSON.parse(await readFile(resolve(config.dataPath, path, "index.json"), "utf8")) as MapIndex;
-
-    if (
-      index.kind !== "map" ||
-      !isCatalogPath(index.originalPath, true) ||
-      !index.variants.every((variant) => isVariantFile(variant.file))
-    ) {
-      return notFound();
-    }
-  } catch {
-    return notFound();
-  }
-
-  const collectionRoot = await realpath(config.filesPath).catch(() => null);
-
-  if (collectionRoot === null) return notFound();
+  if (index === null) return notFound();
 
   const originals: OriginalFile[] = [];
 
   try {
     for (const variant of index.variants) {
-      const requested = resolve(collectionRoot, index.originalPath, variant.file);
-      const original = await realpath(requested);
+      const original = await resolveOriginal(config, index, variant.file);
+
+      if (original === null) throw new Error("Original is outside the collection");
       const handle = await open(original);
       const details = await handle.stat();
 
-      if (!isInside(collectionRoot, original) || !details.isFile()) {
+      if (!details.isFile()) {
         await handle.close();
 
         throw new Error("Original is outside the collection or is not a file");

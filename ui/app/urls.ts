@@ -1,4 +1,4 @@
-import type { CatalogPath } from "../../src/catalog/model.ts";
+import { PRINT_IMAGE_MAX_SIZE, type CatalogPath, type Variant } from "../../src/catalog/model.ts";
 
 // These prefixes must match the locations in nginx.conf.template.
 const CATALOG_PREFIX = "/_catalog";
@@ -41,8 +41,18 @@ export function mapZipUrl(path: CatalogPath): string {
   return `/api/map-zip?path=${encodeURIComponent(path)}`;
 }
 
-export function sliceUrl(original: string): string {
-  return `${PLANAR_PREFIX}/?src=${encodeURIComponent(original)}`;
+function printImageUrl(path: CatalogPath, file: string): string {
+  return `/api/print-image?path=${encodeURIComponent(path)}&variant=${encodeURIComponent(file)}`;
+}
+
+/** Opens an Original or a cached Print image, retaining the physical Grid cell scale. */
+export function sliceUrl(mapPath: CatalogPath, original: string, variant: Variant): string {
+  const longSide = Math.max(variant.width ?? 0, variant.height ?? 0);
+  const scale = longSide > PRINT_IMAGE_MAX_SIZE ? PRINT_IMAGE_MAX_SIZE / longSide : 1;
+  const source = scale === 1 ? original : printImageUrl(mapPath, variant.file);
+  const calibration = variant.gridScale === undefined ? "" : `&ppc=${encodeURIComponent(String(variant.gridScale * scale))}&cell=1in`;
+
+  return `${PLANAR_PREFIX}/?src=${encodeURIComponent(source)}${calibration}`;
 }
 
 /** Inverse of folderUrl: the browser hands over a percent-encoded pathname. */

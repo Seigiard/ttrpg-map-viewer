@@ -14,4 +14,4 @@ Review base: d57ec6f0d430e4fe0f6b384cfd059ba6c308edeb
 - [x] #9 · metadata enrichers and badges
 - [x] #10 · download a whole map as a streamed zip
 - [x] #11 · slicing via self-hosted Planar fork
-- [ ] #12 · calibrated slicing and print image
+- [x] #12 · calibrated slicing and print image

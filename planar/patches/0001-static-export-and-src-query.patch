@@ -1,11 +1,31 @@
 diff --git a/app/page.tsx b/app/page.tsx
-index 7ca80e7..f9c58f3 100644
+index 7ca80e7..ff4311d 100644
 --- a/app/page.tsx
 +++ b/app/page.tsx
-@@ -879,20 +879,7 @@ export default function PlanarApp() {
+@@ -73,6 +73,18 @@ interface ImageItem {
+   backgroundRemoved: boolean;
+ }
+-
++
++function queryCalibration(search: string): number | undefined {
++  const params = new URLSearchParams(search);
++  const ppc = Number(params.get("ppc"));
++  const cell = /^([0-9]+(?:\.[0-9]+)?)\s*(mm|in)$/i.exec(params.get("cell") ?? "");
++  if (!Number.isFinite(ppc) || ppc <= 0 || !cell) return undefined;
++
++  const cellLength = Number(cell[1]);
++  const cellMm = cell[2].toLowerCase() === "in" ? cellLength * 25.4 : cellLength;
++
++  return Number.isFinite(cellMm) && cellMm > 0 ? ppc / cellMm : undefined;
++}
++
+ interface PaperPreset {
+   name: string;
+   width: number; // in mm
+@@ -879,20 +891,7 @@ export default function PlanarApp() {
              }
            }
- 
+
 -          if (url.startsWith("data:")) {
 -            const mimeType = url.substring(5, url.indexOf(";")) || "image/jpeg";
 -            addImageFromDataUrl(url, name, mimeType);
@@ -24,7 +44,7 @@ index 7ca80e7..f9c58f3 100644
          }
        }
      };
-@@ -931,14 +918,7 @@ export default function PlanarApp() {
+@@ -931,14 +930,7 @@ export default function PlanarApp() {
        const text = e.clipboardData.getData("text/plain").trim();
        if (text && /^https?:\/\/\S+\.(jpe?g|png|gif|webp|avif|bmp|svg|heic|heif|tiff?)(\?\S*)?$/i.test(text)) {
          e.preventDefault();
@@ -39,15 +59,42 @@ index 7ca80e7..f9c58f3 100644
 +        await loadImageFromUrl(text, text.split("/").pop() || "pasted-image");
        }
      };
+
+@@ -1158,12 +1150,12 @@ export default function PlanarApp() {
+   // Shared image-creation routine used by file uploads, clipboard paste, and
+   // the built-in example gallery. Scales the image to fit inside the printable
+   // (margin-inset) area and packs it into the layout.
+-  const addImageFromDataUrl = (dataUrl: string, name: string, type: string) => {
++  const addImageFromDataUrl = (dataUrl: string, name: string, type: string, pixelsPerMm?: number) => {
+     const img = new Image();
+     img.onload = () => {
+-      const pxToMm = 0.3528;
+-      let initialW = img.naturalWidth * pxToMm;
+-      let initialH = img.naturalHeight * pxToMm;
++      const calibrated = pixelsPerMm !== undefined;
++      let initialW = img.naturalWidth / (pixelsPerMm ?? (1 / 0.3528));
++      let initialH = img.naturalHeight / (pixelsPerMm ?? (1 / 0.3528));
+-
++
+       const pWidth = paperWidthRef.current;
+       const pHeight = paperHeightRef.current;
+@@ -1171,7 +1163,7 @@ export default function PlanarApp() {
  
-@@ -1218,6 +1198,32 @@ export default function PlanarApp() {
+       const maxWidth = pWidth - 2 * sMargin;
+       const maxHeight = pHeight - 2 * sMargin;
+-      if (initialW > maxWidth || initialH > maxHeight) {
++      if (!calibrated && (initialW > maxWidth || initialH > maxHeight)) {
+         const ratio = Math.min(maxWidth / initialW, maxHeight / initialH);
+         initialW *= ratio;
+         initialH *= ratio;
+@@ -1218,6 +1210,33 @@ export default function PlanarApp() {
      img.src = dataUrl;
    };
  
-+  const loadImageFromUrl = async (url: string, name: string) => {
++  const loadImageFromUrl = async (url: string, name: string, pixelsPerMm?: number) => {
 +    if (url.startsWith("data:")) {
 +      const mimeType = url.substring(5, url.indexOf(";")) || "image/jpeg";
-+      addImageFromDataUrl(url, name, mimeType);
++      addImageFromDataUrl(url, name, mimeType, pixelsPerMm);
 +      return;
 +    }
 +
@@ -55,19 +102,20 @@ index 7ca80e7..f9c58f3 100644
 +      const res = await fetch(url);
 +      const blob = await res.blob();
 +      const dataUrl = await blobToDataUrl(blob);
-+      addImageFromDataUrl(dataUrl, name, blob.type || "image/jpeg");
++      addImageFromDataUrl(dataUrl, name, blob.type || "image/jpeg", pixelsPerMm);
 +    } catch (err) {
 +      console.warn("Failed to fetch image directly (CORS). Falling back to URL source.", err);
-+      addImageFromDataUrl(url, name, "image/jpeg");
++      addImageFromDataUrl(url, name, "image/jpeg", pixelsPerMm);
 +    }
 +  };
 +
 +  useEffect(() => {
-+    const src = new URLSearchParams(window.location.search).get("src");
++    const params = new URLSearchParams(window.location.search);
++    const src = params.get("src");
 +    if (!src) return;
 +
-+    const name = new URL(src, window.location.href).pathname.split("/").pop() || "imported-image";
-+    void loadImageFromUrl(src, name);
++    const name = decodeURIComponent(new URL(src, window.location.href).pathname.split("/").pop() || "imported-image");
++    void loadImageFromUrl(src, name, queryCalibration(params.toString()));
 +  }, []);
 +
    // Load one of the bundled example images (served from /public/examples).
