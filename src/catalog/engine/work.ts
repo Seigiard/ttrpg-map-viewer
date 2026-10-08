@@ -19,26 +19,32 @@ export interface PassContext {
   readonly beforeMapIndexWrite?: (map: MapNode, present: ReadonlySet<string>) => Effect.Effect<void>;
   readonly categories: ReadonlyMap<CatalogPath, CategoryNode>;
   readonly maps: readonly MapNode[];
+  readonly skippedDirectories: ReadonlySet<CatalogPath>;
+  readonly initialMapWritesRemaining: { count: number };
+  readonly initialImages: Array<{ readonly map: MapNode; readonly variant: FileListing; readonly remaining: readonly FileListing[] }>;
 }
 
 export class MapWork extends Data.TaggedClass("MapWork")<{
   readonly map: MapNode;
   readonly pass: PassContext;
   readonly cascadeIndexes: boolean;
+  readonly initial: boolean;
 }> {}
 
 export class CategoryWork extends Data.TaggedClass("CategoryWork")<{ readonly category: CategoryNode; readonly pass: PassContext }> {}
 
 export class SearchWork extends Data.TaggedClass("SearchWork")<{ readonly pass: PassContext }> {}
 
+export class FinalizeIndexesWork extends Data.TaggedClass("FinalizeIndexesWork")<{ readonly pass: PassContext }> {}
+
 export class ImageWork extends Data.TaggedClass("ImageWork")<{
   readonly map: MapNode;
   readonly variant: FileListing;
-  readonly kind: DerivedImageKind;
+  readonly remaining: readonly FileListing[];
   readonly pass: PassContext;
 }> {}
 
-export type CatalogWork = MapWork | CategoryWork | SearchWork | ImageWork;
+export type CatalogWork = MapWork | CategoryWork | SearchWork | FinalizeIndexesWork | ImageWork;
 
 export function imageWorkKey(mapPath: CatalogPath, variantName: string, kind: DerivedImageKind): string {
   return JSON.stringify(["image", mapPath, variantName, kind]);
@@ -51,7 +57,8 @@ export function workKey(work: CatalogWork): string {
       MapWork: ({ map }) => `map:${map.path}`,
       CategoryWork: ({ category }) => `category:${category.path}`,
       SearchWork: () => "search",
-      ImageWork: ({ map, variant, kind }) => imageWorkKey(map.path, variant.name, kind),
+      FinalizeIndexesWork: () => "finalize-indexes",
+      ImageWork: ({ map, variant }) => imageWorkKey(map.path, variant.name, "preview"),
     }),
   );
 }

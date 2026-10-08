@@ -2,9 +2,10 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
+import sharp from "sharp";
 import { readMapIndex, resolveOriginal } from "../../src/catalog/map-index.ts";
 import type { CategoryIndex, MapIndex, SearchIndex } from "../../src/catalog/model.ts";
-import { createWorkspace, LAKESIDE, PIT, type Workspace } from "./collection-fixture.ts";
+import { createWorkspace, image, LAKESIDE, PIT, type Workspace } from "./collection-fixture.ts";
 import { withSession } from "./session.ts";
 
 let workspace: Workspace;
@@ -206,5 +207,24 @@ describe("catalog indexes built by the shared engine", () => {
     const looseOriginal = await resolveOriginal({ filesPath: workspace.collection, dataPath: workspace.output }, loose!, "Loose.png");
 
     expect(await sha256(looseOriginal!)).toBe(await sha256(join(workspace.collection, "Mixed", "Loose.png")));
+  });
+
+  test("derived still images are resized to the preview and thumbnail bounds", async () => {
+    // #given
+    await image(join(workspace.collection, "Large", "Poster", "Poster.png"), 3000, 2000, "png");
+
+    // #when
+    await withSession(workspace, async () => undefined);
+
+    // #then
+    const preview = await sharp(join(workspace.output, "Large", "Poster", "_previews", "Poster.png.webp")).metadata();
+    const thumbnail = await sharp(join(workspace.output, "Large", "Poster", "_thumbnails", "Poster.png.webp")).metadata();
+
+    expect({ format: preview.format, width: preview.width, height: preview.height }).toEqual({ format: "webp", width: 2048, height: 1365 });
+    expect({ format: thumbnail.format, width: thumbnail.width, height: thumbnail.height }).toEqual({
+      format: "webp",
+      width: 512,
+      height: 341,
+    });
   });
 });

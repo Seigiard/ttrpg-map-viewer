@@ -109,17 +109,3 @@ export function selectMapCover(map: MapNode, overrides: CoverOverrides, dimensio
 
   return { ...map, cover: selectCover(map, dimensions) };
 }
-
-/** Selects Covers after the Collection scan, including image metadata without decoding Originals. */
-export function selectMapCovers(
-  maps: readonly MapNode[],
-  overridesPath: string,
-  dimensions: VariantDimensions,
-): Effect.Effect<readonly MapNode[], never> {
-  return Effect.gen(function* () {
-    const overrides = yield* loadCoverOverrides(overridesPath);
-    warnUnknownCoverOverrides(maps, overrides);
-
-    return maps.map((map) => selectMapCover(map, overrides, dimensions));
-  });
-}

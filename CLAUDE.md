@@ -26,4 +26,4 @@ One Docker image: nginx on :80 in front, Bun on 127.0.0.1:3000. Bun runs the sha
 
 ## Finishing a task
 
-Run until clean: `bun run fix`, `bun run lint`, `bun run typecheck`, `bun run test`. `test/engine/` needs Linux `flock`, so it runs only in `bun run test:docker`. After touching nginx, the entrypoint, or the Dockerfile, also build the image and curl it against a small fixture collection.
+Run until clean: `bun run fix`, `bun run lint`, `bun run typecheck`, `bun run test`. `test/engine/` needs Linux `flock`: `bun run test` runs it on Linux, including CI, and skips it elsewhere; on macOS use `bun run test:docker`. After touching nginx, the entrypoint, or the Dockerfile, also build the image and curl it against a small fixture collection.

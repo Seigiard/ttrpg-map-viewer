@@ -6,8 +6,17 @@ import { mtimeOrNull, readTextFile, statPath, type FileSystemError, writeTextFil
 import { categoryIndexFromPublished, mapIndex, previewPath, searchIndexFromPublished, thumbnailPath } from "../folder-index.ts";
 import { enrichMap, readVariantDimensions } from "../metadata.ts";
 import { type CatalogPath, INDEX_FILE, type MapIndex, SEARCH_FILE } from "../model.ts";
-import { ensureDerivedImage, PREVIEW_MAX_SIZE, THUMBNAIL_MAX_SIZE, type DerivedImageKind } from "../thumbnail.ts";
-import { CategoryWork, type CatalogWork, ImageWork, imageWorkKey, MapWork, type PassContext, SearchWork } from "./work.ts";
+import { ensureDerivedImage, PREVIEW_MAX_SIZE, THUMBNAIL_MAX_SIZE, type DerivedImageFailure, type DerivedImageKind } from "../thumbnail.ts";
+import {
+  CategoryWork,
+  type CatalogWork,
+  FinalizeIndexesWork,
+  ImageWork,
+  imageWorkKey,
+  MapWork,
+  type PassContext,
+  SearchWork,
+} from "./work.ts";
 
 function parentOf(path: CatalogPath): CatalogPath {
   const slash = path.lastIndexOf("/");
@@ -36,7 +45,20 @@ function existingDerivedImages(map: MapNode, dataPath: string): Effect.Effect<Re
   ).pipe(Effect.map((keys) => new Set(keys.flat())));
 }
 
-function handleMap({ map, pass, cascadeIndexes }: MapWork): Effect.Effect<readonly CatalogWork[], FileSystemError> {
+function orderedVariants(map: MapNode): readonly FileListing[] {
+  return [map.cover, ...map.variants.filter((variant) => variant !== map.cover)];
+}
+
+function indexCascades(map: MapNode, pass: PassContext): readonly CatalogWork[] {
+  const parent = pass.categories.get(parentOf(map.path));
+
+  return [
+    ...(parent && !pass.skippedDirectories.has(parent.path) ? [new CategoryWork({ category: parent, pass })] : []),
+    new SearchWork({ pass }),
+  ];
+}
+
+function writeMapIndex(map: MapNode, pass: PassContext, cascadeIndexes: boolean): Effect.Effect<readonly CatalogWork[], FileSystemError> {
   return Effect.gen(function* () {
     const dimensions = yield* readVariantDimensions([map], pass.filesPath);
     const enriched = yield* enrichMap(selectMapCover(map, pass.overrides, dimensions), pass.metadata, dimensions);
@@ -52,63 +74,104 @@ function handleMap({ map, pass, cascadeIndexes }: MapWork): Effect.Effect<readon
       JSON.stringify(mapIndex(enriched, hasDerivedImage, dimensions)),
     );
 
-    if (!cascadeIndexes) return [];
-
-    const parent = pass.categories.get(parentOf(map.path));
-
-    return [...(parent ? [new CategoryWork({ category: parent, pass })] : []), new SearchWork({ pass })];
+    return cascadeIndexes && pass.initialMapWritesRemaining.count === 0 ? indexCascades(enriched, pass) : [];
   });
 }
 
-function handleImage({ map, variant, kind, pass }: ImageWork): Effect.Effect<readonly CatalogWork[], FileSystemError> {
+function handleMap({ map, pass, cascadeIndexes, initial }: MapWork): Effect.Effect<readonly CatalogWork[], FileSystemError> {
+  return Effect.gen(function* () {
+    const variants = orderedVariants(map);
+
+    yield* writeMapIndex(map, pass, false).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          if (initial) pass.initialMapWritesRemaining.count = Math.max(0, pass.initialMapWritesRemaining.count - 1);
+        }),
+      ),
+    );
+
+    if (initial) {
+      const first = variants[0];
+
+      if (first) pass.initialImages.push({ map, variant: first, remaining: variants.slice(1) });
+    }
+
+    const cascades = cascadeIndexes && pass.initialMapWritesRemaining.count === 0 ? indexCascades(map, pass) : [];
+
+    return [...cascades];
+  });
+}
+
+function handleFinalizeIndexes({ pass }: FinalizeIndexesWork): Effect.Effect<readonly CatalogWork[], FileSystemError> {
+  if (pass.initialMapWritesRemaining.count > 0) return Effect.sleep(10).pipe(Effect.as([new FinalizeIndexesWork({ pass })]));
+
+  return Effect.succeed([
+    ...[...pass.categories.values()].flatMap((category) =>
+      pass.skippedDirectories.has(category.path) ? [] : [new CategoryWork({ category, pass })],
+    ),
+    new SearchWork({ pass }),
+    ...pass.initialImages.splice(0).map(({ map, variant, remaining }) => new ImageWork({ map, variant, remaining, pass })),
+  ]);
+}
+
+function renderDerivedImages(
+  map: MapNode,
+  variant: FileListing,
+  pass: PassContext,
+): Effect.Effect<void, FileSystemError | DerivedImageFailure> {
   return Effect.gen(function* () {
     const original = join(pass.filesPath, map.sourcePath, variant.name);
-    const key = imageWorkKey(map.path, variant.name, kind);
 
-    if (pass.beforeImageWork) yield* pass.beforeImageWork(map, variant, kind);
+    if (pass.beforeImageWork) yield* pass.beforeImageWork(map, variant, "preview");
 
-    const result = yield* Effect.gen(function* () {
-      if (kind === "preview") {
-        yield* ensureDerivedImage(
-          original,
-          variant.mtimeMs,
-          variant.size,
-          join(pass.dataPath, previewPath(map.path, variant.name)),
-          PREVIEW_MAX_SIZE,
-          isAnimatedVariant(variant.name),
-          pass.force,
-        );
+    yield* ensureDerivedImage(
+      original,
+      variant.mtimeMs,
+      variant.size,
+      join(pass.dataPath, previewPath(map.path, variant.name)),
+      PREVIEW_MAX_SIZE,
+      isAnimatedVariant(variant.name),
+      pass.force,
+    );
 
-        return [new ImageWork({ map, variant, kind: "thumbnail", pass }), new MapWork({ map, pass, cascadeIndexes: true })] as const;
-      }
+    if (pass.beforeImageWork) yield* pass.beforeImageWork(map, variant, "thumbnail");
 
-      const preview = join(pass.dataPath, previewPath(map.path, variant.name));
-      const previewStats = yield* statPath(preview);
-      yield* ensureDerivedImage(
-        preview,
-        previewStats.mtimeMs,
-        previewStats.size,
-        join(pass.dataPath, thumbnailPath(map.path, variant.name)),
-        THUMBNAIL_MAX_SIZE,
-        false,
-        pass.force,
-      );
+    const preview = join(pass.dataPath, previewPath(map.path, variant.name));
+    const previewStats = yield* statPath(preview);
+    yield* ensureDerivedImage(
+      preview,
+      previewStats.mtimeMs,
+      previewStats.size,
+      join(pass.dataPath, thumbnailPath(map.path, variant.name)),
+      THUMBNAIL_MAX_SIZE,
+      false,
+      pass.force,
+    );
+  });
+}
 
-      return [new MapWork({ map, pass, cascadeIndexes: true })] as const;
-    }).pipe(
-      Effect.map((work) => ({ ok: true as const, work })),
+function handleImage({ map, variant, remaining, pass }: ImageWork): Effect.Effect<readonly CatalogWork[], FileSystemError> {
+  return Effect.gen(function* () {
+    const previewKey = imageWorkKey(map.path, variant.name, "preview");
+    const thumbnailKey = imageWorkKey(map.path, variant.name, "thumbnail");
+
+    const result = yield* renderDerivedImages(map, variant, pass).pipe(
+      Effect.map(() => ({ ok: true as const })),
       Effect.catch((error) => Effect.succeed({ ok: false as const, error })),
     );
 
     if (result.ok) {
-      pass.imageFailures.clear(key);
-
-      return result.work;
+      pass.imageFailures.clear(previewKey);
+      pass.imageFailures.clear(thumbnailKey);
+    } else {
+      pass.imageFailures.record(previewKey, result.error.message);
+      pass.imageFailures.record(thumbnailKey, result.error.message);
     }
 
-    pass.imageFailures.record(key, result.error.message);
+    const cascades = yield* writeMapIndex(map, pass, true);
+    const next = remaining[0];
 
-    return [new MapWork({ map, pass, cascadeIndexes: true })];
+    return [...cascades, ...(next ? [new ImageWork({ map, variant: next, remaining: remaining.slice(1), pass })] : [])];
   });
 }
 
@@ -158,8 +221,10 @@ export function handleCatalogWork(work: CatalogWork): Effect.Effect<readonly Cat
   return Match.value(work).pipe(
     Match.tagsExhaustive({
       MapWork: handleMap,
-      CategoryWork: ({ category, pass }) => handleCategory(category, pass.dataPath),
+      CategoryWork: ({ category, pass }) =>
+        pass.skippedDirectories.has(category.path) ? Effect.succeed([]) : handleCategory(category, pass.dataPath),
       SearchWork: ({ pass }) => handleSearch(pass),
+      FinalizeIndexesWork: handleFinalizeIndexes,
       ImageWork: handleImage,
     }),
   );

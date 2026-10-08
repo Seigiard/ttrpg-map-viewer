@@ -333,17 +333,4 @@ export function enrichMap(map: MapNode, sources: MetadataSources, dimensions: Va
   );
 }
 
-export function enrichMapMetadata(
-  maps: readonly MapNode[],
-  listing: FolderListing,
-  filesPath: string,
-  dimensions: VariantDimensions,
-): Effect.Effect<readonly MapNode[], never> {
-  return Effect.gen(function* () {
-    const sources = yield* loadMetadataSources(listing, filesPath);
-
-    return yield* Effect.forEach(maps, (map) => enrichMap(map, sources, dimensions));
-  });
-}
-
 /* oxlint-enable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion */

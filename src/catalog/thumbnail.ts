@@ -110,7 +110,7 @@ function renderVideoFrame(original: string, destination: string, maxSize: number
   );
 }
 
-/** Makes a derived WebP unless its stored Original signature matches the current Original. */
+/** Makes a derived WebP unless force is false and its stored Original signature matches the current Original. */
 export function ensureDerivedImage(
   original: string,
   originalMtimeMs: number,

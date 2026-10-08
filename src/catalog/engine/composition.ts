@@ -11,8 +11,22 @@ import type { DerivedImageKind } from "../thumbnail.ts";
 import { handleCatalogWork } from "./handlers.ts";
 import { createImageFailureRegistry, type ImageFailureRegistry } from "./image-status.ts";
 import { listingFromEntries } from "./listing.ts";
-import { catalogStatePath, includeObservableCollectionSource } from "./policy.ts";
-import { CategoryWork, ImageWork, imageWorkKey, MapWork, SearchWork, type CatalogWork, workKey, type PassContext } from "./work.ts";
+import {
+  catalogStatePath,
+  includeObservableCollectionSource,
+  type SourceObservabilityOverride,
+  type UnobservableSourceKind,
+} from "./policy.ts";
+import {
+  CategoryWork,
+  FinalizeIndexesWork,
+  imageWorkKey,
+  MapWork,
+  SearchWork,
+  type CatalogWork,
+  workKey,
+  type PassContext,
+} from "./work.ts";
 
 export interface CatalogSynchronizationOptions {
   readonly filesPath: string;
@@ -22,6 +36,7 @@ export interface CatalogSynchronizationOptions {
   readonly imageFailures?: ImageFailureRegistry;
   readonly beforeImageWork?: (map: MapNode, variant: FileListing, kind: DerivedImageKind) => Effect.Effect<void>;
   readonly beforeMapIndexWrite?: (map: MapNode, present: ReadonlySet<string>) => Effect.Effect<void>;
+  readonly sourceObservability?: SourceObservabilityOverride;
   /** Zero disables the engine's periodic reconciliation. */
   readonly reconcileIntervalMs: number;
 }
@@ -73,14 +88,19 @@ function logDiagnostics(listing: FolderListing, maps: readonly MapNode[]): void 
  */
 export function catalogLiveOptions(options: CatalogSynchronizationOptions): LiveOptions<CatalogWork, FileSystemError, never> {
   const imageFailures = options.imageFailures ?? createImageFailureRegistry();
-  const unobservableSources = new Set<string>();
+  const unobservableSources = new Map<string, UnobservableSourceKind>();
 
   return {
     sourcePath: options.filesPath,
     outputPath: options.dataPath,
     statePath: catalogStatePath(options.dataPath),
     includeSource: (path) =>
-      includeObservableCollectionSource(options.filesPath, path, (unobservable) => unobservableSources.add(unobservable)),
+      includeObservableCollectionSource(
+        options.filesPath,
+        path,
+        (unobservable, kind) => unobservableSources.set(unobservable, kind),
+        options.sourceObservability,
+      ),
     reconcileIntervalMs: options.reconcileIntervalMs,
     handle: handleCatalogWork,
     concurrency: options.thumbnailConcurrency,
@@ -95,11 +115,22 @@ export function catalogLiveOptions(options: CatalogSynchronizationOptions): Live
     declare: (entries: readonly SourceEntry[], request) =>
       Effect.gen(function* () {
         const startedAt = Date.now();
-        const preservePrefixes = [...unobservableSources];
+        const unobservable = new Map(unobservableSources);
+        const preservePrefixes = [...unobservable.keys()];
+        const skippedDirectories = new Set([...unobservable].flatMap(([path, kind]) => (kind === "directory" ? [path] : [])));
         unobservableSources.clear();
-        const listing = listingFromEntries(entries);
+        const entryPaths = new Set(entries.map((entry) => entry.path));
+
+        const listing = listingFromEntries([
+          ...entries,
+          ...[...skippedDirectories].flatMap((path) =>
+            entryPaths.has(path) ? [] : [{ path, kind: "directory" as const, size: 0, mtimeMs: 0 }],
+          ),
+        ]);
+
         const { root } = classifyCollection(listing);
-        const { categories, maps } = collectNodes(root);
+        const { categories: allCategories, maps } = collectNodes(root);
+        const categories = allCategories.filter((category) => !skippedDirectories.has(category.path));
 
         logDiagnostics(listing, maps);
 
@@ -117,8 +148,11 @@ export function catalogLiveOptions(options: CatalogSynchronizationOptions): Live
           force: request.force,
           beforeImageWork: options.beforeImageWork,
           beforeMapIndexWrite: options.beforeMapIndexWrite,
-          categories: new Map(categories.map((category) => [category.path, category])),
+          categories: new Map(allCategories.map((category) => [category.path, category])),
           maps,
+          skippedDirectories,
+          initialMapWritesRemaining: { count: maps.length },
+          initialImages: [],
         };
 
         const declaredImageKeys = new Set(
@@ -134,15 +168,10 @@ export function catalogLiveOptions(options: CatalogSynchronizationOptions): Live
 
         return {
           minimum: [new CategoryWork({ category: root, pass })],
-          work: [
-            ...maps.map((map) => new MapWork({ map, pass, cascadeIndexes: false })),
-            ...categories.map((category) => new CategoryWork({ category, pass })),
-            new SearchWork({ pass }),
-            ...maps.flatMap((map) => [
-              new ImageWork({ map, variant: map.cover, kind: "preview", pass }),
-              ...map.variants.flatMap((variant) => (variant === map.cover ? [] : [new ImageWork({ map, variant, kind: "preview", pass })])),
-            ]),
-          ],
+          work:
+            maps.length === 0
+              ? [...categories.map((category) => new CategoryWork({ category, pass })), new SearchWork({ pass })]
+              : [...maps.map((map) => new MapWork({ map, pass, cascadeIndexes: false, initial: true })), new FinalizeIndexesWork({ pass })],
           publish: expectedOutputManifest(categories, maps, options.dataPath, options.overridesPath, preservePrefixes).pipe(
             Effect.andThen((manifest) => pruneOrphans(options.dataPath, manifest, startedAt)),
             Effect.tap(() =>

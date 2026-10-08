@@ -32,22 +32,6 @@ function coverOf(map: MapNode, hasDerivedImage: DerivedImageAvailability): Cover
   };
 }
 
-export function categoryIndex(category: CategoryNode, hasDerivedImage: DerivedImageAvailability): CategoryIndex {
-  return {
-    kind: "category",
-    name: category.name,
-    path: category.path,
-    categories: category.categories.map((child) => ({ name: child.name, path: child.path })),
-    maps: category.maps.map((map) => ({
-      name: map.name,
-      path: map.path,
-      variantCount: map.variants.length,
-      cover: coverOf(map, hasDerivedImage),
-      ...map.metadata,
-    })),
-  };
-}
-
 export function mapIndex(map: MapNode, hasDerivedImage: DerivedImageAvailability, dimensions: VariantDimensions): MapIndex {
   return {
     kind: "map",
@@ -69,22 +53,6 @@ export function mapIndex(map: MapNode, hasDerivedImage: DerivedImageAvailability
         ...variant.metadata,
       };
     }),
-  };
-}
-
-export function searchIndex(maps: readonly MapNode[], hasDerivedImage: DerivedImageAvailability): SearchIndex {
-  return {
-    maps: maps
-      .map((map) => ({
-        name: map.name,
-        path: map.path,
-        categoryPath: map.path.split("/").slice(0, -1),
-        thumbnail: hasDerivedImage(map, map.cover, "thumbnail") ? thumbnailPath(map.path, map.cover.name) : null,
-        variantCount: map.variants.length,
-        author: map.metadata?.author,
-        tags: map.metadata?.tags,
-      }))
-      .sort((a, b) => a.path.localeCompare(b.path, "en", { sensitivity: "base" })),
   };
 }
 

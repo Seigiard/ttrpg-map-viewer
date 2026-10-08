@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { acquireOutputTree } from "@seigiard/sync-engine";
 import { Deferred, Effect, Exit } from "effect";
-import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { openCatalogSynchronization, startCatalogSynchronization } from "../../src/catalog/engine/composition.ts";
 import { startEngineRuntime } from "../../src/catalog/engine/runtime.ts";
@@ -86,6 +86,110 @@ describe("a later pass in the same engine session", () => {
         }),
       ),
     );
+  }, 15_000);
+
+  test("publishes one map's derived references while a later map preview is still held", async () => {
+    await image(join(workspace.collection, "AAA First", "First.png"), 40, 40, "png");
+    await image(join(workspace.collection, "ZZZ Held", "Held.png"), 40, 40, "png");
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          // #given
+          const entered = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+
+          const session = yield* startCatalogSynchronization({
+            ...sessionOptions(workspace),
+            beforeImageWork: (map, _variant, kind) =>
+              map.path === "ZZZ Held" && kind === "preview"
+                ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+                : Effect.void,
+          });
+
+          yield* Deferred.await(entered);
+
+          // #when
+          yield* ownedPromise(
+            async () => {
+              for (let attempt = 0; attempt < 50; attempt += 1) {
+                const first = await readJson<MapIndex>(join(workspace.output, "AAA First", "index.json"));
+                const variant = first.variants[0]!;
+
+                if (
+                  variant.preview === "AAA First/_previews/First.png.webp" &&
+                  variant.thumbnail === "AAA First/_thumbnails/First.png.webp"
+                )
+                  return;
+                await new Promise((resolve) => setTimeout(resolve, 10));
+              }
+
+              throw new Error("first map references did not publish while later preview was held");
+            },
+            (cause) => new Error(String(cause)),
+          );
+
+          // #then
+          const held = yield* ownedPromise(
+            () => readJson<MapIndex>(join(workspace.output, "ZZZ Held", "index.json")),
+            (cause) => new Error(String(cause)),
+          );
+
+          expect(held.variants[0]?.preview).toBeNull();
+          yield* Deferred.succeed(release, undefined);
+          yield* session.awaitCompletion;
+        }),
+      ),
+    );
+  }, 15_000);
+
+  test("category and search indexes wait for slow initial map writes", async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          // #given
+          const entered = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          let held = false;
+
+          const session = yield* startCatalogSynchronization({
+            ...sessionOptions(workspace),
+            beforeMapIndexWrite: (map) => {
+              if (held || map.path !== PIT) return Effect.void;
+              held = true;
+
+              return Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)));
+            },
+          });
+
+          yield* Deferred.await(entered);
+
+          // #when
+          yield* Effect.sleep(50);
+
+          // #then
+          const categoryExists = yield* ownedPromise(
+            () => exists(join(workspace.output, "czepuku", "CZEPEKU Fantasy Maps", "index.json")),
+            (cause) => new Error(String(cause)),
+          );
+
+          const searchExists = yield* ownedPromise(
+            () => exists(join(workspace.output, "search.json")),
+            (cause) => new Error(String(cause)),
+          );
+
+          expect([categoryExists, searchExists]).toEqual([false, false]);
+
+          yield* Deferred.succeed(release, undefined);
+          yield* session.awaitCompletion;
+        }),
+      ),
+    );
+
+    expect(
+      (await readJson<CategoryIndex>(join(workspace.output, "czepuku", "CZEPEKU Fantasy Maps", "index.json"))).maps.map((map) => map.path),
+    ).toContain(PIT);
+    expect(await searchPaths()).toContain(PIT);
   }, 15_000);
 
   test("publishes a map added to the source and updates its category and the search index", async () => {
@@ -338,25 +442,104 @@ describe("failures", () => {
     }
   });
 
-  test("an unreadable subfolder keeps its prior output instead of failing or pruning it", async () => {
-    // #given
-    await withSession(workspace, async (session) => {
-      const outputBefore = await readFile(join(workspace.output, "Mixed", "Inner", "index.json"), "utf8");
-      const unreadable = join(workspace.collection, "Mixed", "Inner");
+  test("an unreadable subfolder keeps its parent category, loose map and prior child output", async () => {
+    const unobservable = new Set<string>();
 
-      try {
-        await chmod(unreadable, 0o000);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          // #given
+          const session = yield* startCatalogSynchronization({
+            ...sessionOptions(workspace),
+            sourceObservability: (path) => (unobservable.has(path) ? "directory" : undefined),
+          });
 
-        // #when
-        await passOf(session);
+          yield* session.awaitCompletion;
 
-        // #then
-        expect(await readFile(join(workspace.output, "Mixed", "Inner", "index.json"), "utf8")).toBe(outputBefore);
-        expect((await Effect.runPromise(session.status)).failure).toBeNull();
-      } finally {
-        await chmod(unreadable, 0o755).catch(() => undefined);
-      }
-    });
+          const innerBefore = yield* ownedPromise(
+            () => readFile(join(workspace.output, "Mixed", "Inner", "index.json"), "utf8"),
+            (cause) => new Error(String(cause)),
+          );
+
+          const looseBefore = yield* ownedPromise(
+            () => readFile(join(workspace.output, "Mixed", "._loose", "index.json"), "utf8"),
+            (cause) => new Error(String(cause)),
+          );
+
+          unobservable.add("Mixed/Inner");
+
+          // #when
+          yield* session.requestPass({ force: false });
+          yield* session.awaitCompletion;
+
+          // #then
+          expect(
+            yield* ownedPromise(
+              () => readFile(join(workspace.output, "Mixed", "Inner", "index.json"), "utf8"),
+              (cause) => new Error(String(cause)),
+            ),
+          ).toBe(innerBefore);
+          expect(
+            yield* ownedPromise(
+              () => readFile(join(workspace.output, "Mixed", "._loose", "index.json"), "utf8"),
+              (cause) => new Error(String(cause)),
+            ),
+          ).toBe(looseBefore);
+          expect((yield* session.status).failure).toBeNull();
+        }),
+      ),
+    );
+
+    expect((await readJson<CategoryIndex>(join(workspace.output, "Mixed", "index.json"))).kind).toBe("category");
+    expect(await exists(join(workspace.output, "Mixed", "._loose", "_thumbnails", "Loose.png.webp"))).toBe(true);
+  });
+
+  test("an unreadable image keeps its map and prior derived output", async () => {
+    const unobservable = new Set<string>();
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          // #given
+          const session = yield* startCatalogSynchronization({
+            ...sessionOptions(workspace),
+            sourceObservability: (path) => (unobservable.has(path) ? "file" : undefined),
+          });
+
+          yield* session.awaitCompletion;
+          const preview = join(workspace.output, "Mixed", "Inner", "_previews", "Room.jpg.webp");
+          const thumbnail = join(workspace.output, "Mixed", "Inner", "_thumbnails", "Room.jpg.webp");
+
+          unobservable.add("Mixed/Inner/Room.jpg");
+          yield* ownedPromise(
+            () => writeFile(join(workspace.collection, "Mixed", "Inner", "Room.jpg"), "not an image"),
+            (cause) => new Error(String(cause)),
+          );
+
+          // #when
+          yield* session.requestPass({ force: false });
+          yield* session.awaitCompletion;
+
+          // #then
+          expect(
+            yield* ownedPromise(
+              () => exists(preview),
+              (cause) => new Error(String(cause)),
+            ),
+          ).toBe(true);
+          expect(
+            yield* ownedPromise(
+              () => exists(thumbnail),
+              (cause) => new Error(String(cause)),
+            ),
+          ).toBe(true);
+        }),
+      ),
+    );
+
+    expect(
+      (await readJson<MapIndex>(join(workspace.output, "Mixed", "Inner", "index.json"))).variants.map((variant) => variant.file),
+    ).toEqual(["Room.jpg"]);
   });
 
   test("a derived image failure stays visible while unrelated images publish", async () => {
@@ -446,68 +629,9 @@ describe("failures", () => {
     }
   });
 
-  test("same-map preview and thumbnail republishes leave the final index with both references", async () => {
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          // #given
-          const entered = yield* Deferred.make<void>();
-          const release = yield* Deferred.make<void>();
-          const separator = String.fromCharCode(0);
-          let held = false;
-          let concurrentDuringHold = 0;
-
-          const session = yield* startCatalogSynchronization({
-            ...sessionOptions(workspace),
-            beforeImageWork: (map, variant, kind) =>
-              map.path === PIT && variant.name === "Empty Day.jpg" && kind === "thumbnail" ? Deferred.await(entered) : Effect.void,
-            beforeMapIndexWrite: (map, present) => {
-              const hasPreview = present.has(`Empty Day.jpg${separator}preview`);
-              const hasThumbnail = present.has(`Empty Day.jpg${separator}thumbnail`);
-
-              if (map.path !== PIT || !hasPreview) return Effect.void;
-
-              if (held) {
-                if (hasThumbnail) concurrentDuringHold += 1;
-
-                return Effect.void;
-              }
-
-              if (hasThumbnail) return Effect.void;
-
-              held = true;
-
-              return Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)));
-            },
-          });
-
-          yield* Deferred.await(entered);
-
-          for (let attempt = 0; attempt < 50; attempt += 1) {
-            const published = yield* ownedPromise(
-              () => exists(join(workspace.output, PIT, "_thumbnails", "Empty Day.jpg.webp")),
-              (cause) => new Error(String(cause)),
-            );
-
-            if (published) break;
-
-            if (attempt === 49) {
-              return yield* Effect.fail(new Error("thumbnail did not publish while the first map republish was held"));
-            }
-
-            yield* Effect.sleep(10);
-          }
-
-          yield* Effect.sleep(50);
-
-          expect(concurrentDuringHold).toBe(0);
-
-          // #when
-          yield* Deferred.succeed(release, undefined);
-          yield* session.awaitCompletion;
-        }),
-      ),
-    );
+  test("same-map preview and thumbnail publication leaves the final index with both references", async () => {
+    // #given / #when
+    await withSession(workspace, async () => undefined);
 
     // #then
     const variant = (await readJson<MapIndex>(join(workspace.output, PIT, "index.json"))).variants.find(
