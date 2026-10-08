@@ -4,6 +4,7 @@ import { Effect, Exit } from "effect";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { openCatalogSynchronization } from "../../src/catalog/engine/composition.ts";
+import { startEngineRuntime } from "../../src/catalog/engine/runtime.ts";
 import type { CategoryIndex, MapIndex, SearchIndex } from "../../src/catalog/model.ts";
 import { createWorkspace, image, LAKESIDE, PIT, type Workspace } from "./collection-fixture.ts";
 import { passOf, sessionOptions, withSession } from "./session.ts";
@@ -182,6 +183,29 @@ describe("failures", () => {
       // #then
       expect((await Effect.runPromise(session.status)).failure).toBeNull();
     });
+  });
+
+  test("a derived image failure stays visible while unrelated images publish", async () => {
+    // #given
+    await mkdir(join(workspace.output, PIT, "_previews", "Original Night.jpg.webp"), { recursive: true });
+    const runtime = startEngineRuntime(sessionOptions(workspace));
+
+    try {
+      // #when
+      await runtime.ready;
+      const status = await runtime.status();
+      const index = await readJson<MapIndex>(join(workspace.output, PIT, "index.json"));
+
+      // #then
+      expect(status.work.state).toBe("complete-with-errors");
+      expect(status.work.errors.map((error) => error.work)).toContain(`image:${PIT}:Original Night.jpg:preview`);
+      expect(index.variants.find((variant) => variant.file === "Original Night.jpg")?.preview).toBeNull();
+      expect(index.variants.find((variant) => variant.file === "Original Night.jpg")?.thumbnail).toBeNull();
+      expect(index.variants.find((variant) => variant.file === "Empty Day.jpg")?.preview).toBe(`${PIT}/_previews/Empty Day.jpg.webp`);
+      expect(await exists(join(workspace.output, PIT, "_thumbnails", "Empty Day.jpg.webp"))).toBe(true);
+    } finally {
+      await runtime.stop();
+    }
   });
 });
 

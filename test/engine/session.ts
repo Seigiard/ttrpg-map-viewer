@@ -5,7 +5,13 @@ import type { Workspace } from "./collection-fixture.ts";
 export type Session = Effect.Success<ReturnType<typeof openCatalogSynchronization>>;
 
 export function sessionOptions(workspace: Workspace) {
-  return { filesPath: workspace.collection, dataPath: workspace.output, overridesPath: workspace.overrides, reconcileIntervalMs: 0 };
+  return {
+    filesPath: workspace.collection,
+    dataPath: workspace.output,
+    overridesPath: workspace.overrides,
+    thumbnailConcurrency: 2,
+    reconcileIntervalMs: 0,
+  };
 }
 
 /** Opens the composition, runs the callback while the session holds the output tree, and closes it. */

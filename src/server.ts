@@ -59,6 +59,7 @@ function startEngineComposition(): Composition {
     filesPath: config.filesPath,
     dataPath: config.dataPath,
     overridesPath: config.overridesPath,
+    thumbnailConcurrency: config.thumbnailConcurrency,
     reconcileIntervalMs: config.reconcileIntervalMs,
   });
 

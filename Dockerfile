@@ -1,9 +1,10 @@
 FROM oven/bun:1-alpine AS base
-RUN apk add --no-cache ffmpeg inotify-tools nginx util-linux
+RUN apk add --no-cache ffmpeg inotify-tools nginx unzip util-linux
 WORKDIR /app
 
 FROM base AS development
 COPY package.json bun.lock ./
+COPY vendor ./vendor
 RUN bun install --frozen-lockfile
 
 FROM development AS ui
@@ -24,6 +25,7 @@ RUN git clone "$(sed -n '1p' /vendor/UPSTREAM)" planar \
 
 FROM base AS production
 COPY package.json bun.lock ./
+COPY vendor ./vendor
 RUN bun install --frozen-lockfile --production
 COPY src ./src
 COPY --from=ui /app/static ./static

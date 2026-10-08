@@ -7,14 +7,17 @@ import type { FileSystemError } from "../file-system.ts";
 import { loadMetadataSources } from "../metadata.ts";
 import { expectedOutputManifest, pruneOrphans } from "../output-manifest.ts";
 import { handleCatalogWork } from "./handlers.ts";
+import { createImageFailureRegistry, type ImageFailureRegistry } from "./image-status.ts";
 import { listingFromEntries } from "./listing.ts";
 import { catalogStatePath, includeCollectionSource } from "./policy.ts";
-import { CategoryWork, MapWork, SearchWork, type CatalogWork, workKey, type PassContext } from "./work.ts";
+import { CategoryWork, ImageWork, MapWork, SearchWork, type CatalogWork, workKey, type PassContext } from "./work.ts";
 
 export interface CatalogSynchronizationOptions {
   readonly filesPath: string;
   readonly dataPath: string;
   readonly overridesPath: string;
+  readonly thumbnailConcurrency: number;
+  readonly imageFailures?: ImageFailureRegistry;
   /** Zero disables the engine's periodic reconciliation. */
   readonly reconcileIntervalMs: number;
 }
@@ -65,6 +68,8 @@ function logDiagnostics(listing: FolderListing, maps: readonly MapNode[]): void 
  * this module only gives the observed source its meaning and says what each index depends on.
  */
 export function catalogLiveOptions(options: CatalogSynchronizationOptions): LiveOptions<CatalogWork, FileSystemError, never> {
+  const imageFailures = options.imageFailures ?? createImageFailureRegistry();
+
   return {
     sourcePath: options.filesPath,
     outputPath: options.dataPath,
@@ -72,6 +77,7 @@ export function catalogLiveOptions(options: CatalogSynchronizationOptions): Live
     includeSource: includeCollectionSource,
     reconcileIntervalMs: options.reconcileIntervalMs,
     handle: handleCatalogWork,
+    concurrency: options.thumbnailConcurrency,
     key: workKey,
     failureKey: workKey,
     declare: (entries: readonly SourceEntry[]) =>
@@ -100,6 +106,7 @@ export function catalogLiveOptions(options: CatalogSynchronizationOptions): Live
           listing,
           overrides,
           metadata,
+          imageFailures,
           categories: new Map(categories.map((category) => [category.path, category])),
           maps,
         };
@@ -107,6 +114,10 @@ export function catalogLiveOptions(options: CatalogSynchronizationOptions): Live
         return {
           work: [
             ...maps.map((map) => new MapWork({ map, pass })),
+            ...maps.flatMap((map) => [
+              new ImageWork({ map, variant: map.cover, kind: "preview", pass }),
+              ...map.variants.flatMap((variant) => (variant === map.cover ? [] : [new ImageWork({ map, variant, kind: "preview", pass })])),
+            ]),
             ...categories.map((category) => new CategoryWork({ category, pass })),
             new SearchWork({ pass }),
           ],
