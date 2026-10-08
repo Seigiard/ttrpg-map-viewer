@@ -118,6 +118,7 @@ export function ensureDerivedImage(
   destination: string,
   maxSize: number,
   animated: boolean,
+  force = false,
 ): Effect.Effect<DerivedImageOutcome, DerivedImageFailure | FileSystemError> {
   return Effect.gen(function* () {
     const signature = sourceSignature(originalMtimeMs, originalSize);
@@ -128,7 +129,7 @@ export function ensureDerivedImage(
 
     const existingMtime = yield* mtimeOrNull(destination);
 
-    if (existingMtime !== null && existingSignature === signature) return "fresh";
+    if (!force && existingMtime !== null && existingSignature === signature) return "fresh";
 
     yield* ensureParentDirectory(destination);
     yield* animated ? renderVideoFrame(original, destination, maxSize) : renderStillImage(original, destination, maxSize);

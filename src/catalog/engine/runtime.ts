@@ -9,7 +9,7 @@ const REPORT_INTERVAL_MS = 5_000;
 const firstLine = (cause: Cause.Cause<unknown>) => Cause.pretty(cause).split("\n")[0] ?? "";
 
 export interface EngineRuntime {
-  /** Resolves after the first pass; rejects when it failed, which the process treats as fatal. */
+  /** Resolves when startup establishes usable output; rejects only when no output can be served. */
   readonly ready: Promise<void>;
   /** Asks for a pass; the engine combines requests that arrive while one runs. */
   readonly requestPass: (force?: boolean) => Promise<void>;
@@ -62,7 +62,11 @@ export function startEngineRuntime(options: CatalogSynchronizationOptions): Engi
         available: status.availability !== null,
         availableFrom: status.availability,
         verifying,
-        completed: !verifying && (workState === "complete" || workState === "complete-with-errors"),
+        completed:
+          !verifying &&
+          status.state !== "failed" &&
+          status.failure === null &&
+          (workState === "complete" || workState === "complete-with-errors"),
         errors: [
           ...workErrors.map((error) => ({ source: "work" as const, message: `${error.work}: ${error.message}` })),
           ...(status.failure ? [{ source: "pass" as const, message: firstLine(status.failure) }] : []),
@@ -115,7 +119,8 @@ export function startEngineRuntime(options: CatalogSynchronizationOptions): Engi
     { signal: controller.signal },
   ).catch((cause: unknown) => {
     session.reject(cause);
-    ready.reject(cause);
+
+    if (!controller.signal.aborted) ready.reject(cause);
 
     if (!controller.signal.aborted) log.error("Generate", "Synchronization failed", cause);
   });

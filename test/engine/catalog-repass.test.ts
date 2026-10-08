@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { acquireOutputTree } from "@seigiard/sync-engine";
 import { Deferred, Effect, Exit } from "effect";
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { openCatalogSynchronization, startCatalogSynchronization } from "../../src/catalog/engine/composition.ts";
 import { startEngineRuntime } from "../../src/catalog/engine/runtime.ts";
@@ -31,9 +31,63 @@ const exists = (path: string) =>
     () => false,
   );
 
+async function waitFor(path: string, label: string): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (await exists(path)) return;
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  throw new Error(`${label} did not appear`);
+}
+
 const searchPaths = async () => (await readJson<SearchIndex>(join(workspace.output, "search.json"))).maps.map((map) => map.path);
 
 describe("a later pass in the same engine session", () => {
+  test("publishes category and search indexes before held preview work finishes", async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          // #given
+          const entered = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+
+          const session = yield* startCatalogSynchronization({
+            ...sessionOptions(workspace),
+            beforeImageWork: (_map, _variant, kind) =>
+              kind === "preview" ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))) : Effect.void,
+          });
+
+          yield* Deferred.await(entered);
+
+          // #when
+          yield* ownedPromise(
+            () => waitFor(join(workspace.output, "search.json"), "search index"),
+            (cause) => new Error(String(cause)),
+          );
+
+          // #then
+          const category = yield* ownedPromise(
+            () => readJson<CategoryIndex>(join(workspace.output, "czepuku", "CZEPEKU Fantasy Maps", "index.json")),
+            (cause) => new Error(String(cause)),
+          );
+
+          const search = yield* ownedPromise(
+            () => readJson<SearchIndex>(join(workspace.output, "search.json")),
+            (cause) => new Error(String(cause)),
+          );
+
+          expect(category.maps.map((map) => map.path)).toEqual([PIT, LAKESIDE]);
+          expect(search.maps.map((map) => map.path)).toContain(PIT);
+          expect(search.maps.find((map) => map.path === PIT)?.thumbnail).toBeNull();
+
+          yield* Deferred.succeed(release, undefined);
+          yield* session.awaitCompletion;
+        }),
+      ),
+    );
+  }, 15_000);
+
   test("publishes a map added to the source and updates its category and the search index", async () => {
     // #given
     await withSession(workspace, async (session) => {
@@ -121,6 +175,36 @@ describe("a later pass in the same engine session", () => {
 
     // #then
     expect(await Promise.all(files.map((path) => stat(path).then(({ mtimeMs }) => mtimeMs)))).toEqual(before);
+  });
+
+  test("a forced pass recreates derived images even when the stored signature is fresh", async () => {
+    // #given
+    await withSession(workspace, async (session) => {
+      const preview = join(workspace.output, PIT, "_previews", "Empty Day.jpg.webp");
+      const before = await readFile(preview);
+      await writeFile(preview, "not a webp");
+
+      // #when
+      await passOf(session, true);
+
+      // #then
+      expect(await readFile(preview)).toEqual(before);
+    });
+  });
+
+  test("colon-bearing map and variant names do not collide in image scheduling", async () => {
+    // #given
+    await image(join(workspace.collection, "A", "B:C.png"), 40, 40, "png");
+    await image(join(workspace.collection, "A:B", "C.png"), 40, 40, "png");
+
+    // #when
+    await withSession(workspace, async () => undefined);
+
+    // #then
+    expect((await readJson<MapIndex>(join(workspace.output, "A", "index.json"))).variants[0]?.preview).toBe("A/_previews/B:C.png.webp");
+    expect((await readJson<MapIndex>(join(workspace.output, "A:B", "index.json"))).variants[0]?.preview).toBe("A:B/_previews/C.png.webp");
+    expect(await exists(join(workspace.output, "A", "_thumbnails", "B:C.png.webp"))).toBe(true);
+    expect(await exists(join(workspace.output, "A:B", "_thumbnails", "C.png.webp"))).toBe(true);
   });
 
   test("a readable empty source publishes an empty root catalog and prunes stale map output", async () => {
@@ -254,6 +338,27 @@ describe("failures", () => {
     }
   });
 
+  test("an unreadable subfolder keeps its prior output instead of failing or pruning it", async () => {
+    // #given
+    await withSession(workspace, async (session) => {
+      const outputBefore = await readFile(join(workspace.output, "Mixed", "Inner", "index.json"), "utf8");
+      const unreadable = join(workspace.collection, "Mixed", "Inner");
+
+      try {
+        await chmod(unreadable, 0o000);
+
+        // #when
+        await passOf(session);
+
+        // #then
+        expect(await readFile(join(workspace.output, "Mixed", "Inner", "index.json"), "utf8")).toBe(outputBefore);
+        expect((await Effect.runPromise(session.status)).failure).toBeNull();
+      } finally {
+        await chmod(unreadable, 0o755).catch(() => undefined);
+      }
+    });
+  });
+
   test("a derived image failure stays visible while unrelated images publish", async () => {
     // #given
     await mkdir(join(workspace.output, PIT, "_previews", "Original Night.jpg.webp"), { recursive: true });
@@ -267,12 +372,76 @@ describe("failures", () => {
 
       // #then
       expect(status.work.state).toBe("complete-with-errors");
-      expect(status.work.errors.map((error) => error.work)).toContain(`image:${PIT}:Original Night.jpg:preview`);
+      expect(status.work.errors.map((error) => error.work)).toContain(JSON.stringify(["image", PIT, "Original Night.jpg", "preview"]));
       expect(index.variants.find((variant) => variant.file === "Original Night.jpg")?.preview).toBeNull();
       expect(index.variants.find((variant) => variant.file === "Original Night.jpg")?.thumbnail).toBeNull();
       expect(index.variants.find((variant) => variant.file === "Empty Day.jpg")?.preview).toBe(`${PIT}/_previews/Empty Day.jpg.webp`);
       expect(await exists(join(workspace.output, PIT, "_thumbnails", "Empty Day.jpg.webp"))).toBe(true);
     } finally {
+      await runtime.stop();
+    }
+  });
+
+  test("image failures for deleted variants are cleared after the next successful scan", async () => {
+    // #given
+    await mkdir(join(workspace.output, PIT, "_previews", "Original Night.jpg.webp"), { recursive: true });
+    const runtime = startEngineRuntime(sessionOptions(workspace));
+
+    try {
+      await runtime.ready;
+      expect((await runtime.status()).work.errors.map((error) => error.work)).toContain(
+        JSON.stringify(["image", PIT, "Original Night.jpg", "preview"]),
+      );
+
+      // #when
+      await rm(join(workspace.collection, PIT, "Original Night.jpg"));
+      await runtime.requestPass();
+
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        const status = await runtime.status();
+
+        if (status.completed && status.work.errors.length === 0) break;
+
+        if (attempt === 49) throw new Error("image failure did not clear after variant deletion");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+
+      // #then
+      expect((await runtime.status()).work.errors).toEqual([]);
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  test("stopping during the first pass does not reject readiness", async () => {
+    const entered = await Effect.runPromise(Deferred.make<void>());
+    const release = await Effect.runPromise(Deferred.make<void>());
+
+    const runtime = startEngineRuntime({
+      ...sessionOptions(workspace),
+      beforeImageWork: () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))),
+    });
+
+    try {
+      // #given
+      await Effect.runPromise(Deferred.await(entered));
+
+      const readyOutcome = runtime.ready.then(
+        () => "resolved" as const,
+        () => "rejected" as const,
+      );
+
+      // #when
+      const stopped = runtime.stop();
+      await Effect.runPromise(Deferred.succeed(release, undefined));
+      await stopped;
+
+      // #then
+      expect(await Promise.race([readyOutcome, new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 10))])).not.toBe(
+        "rejected",
+      );
+    } finally {
+      await Effect.runPromise(Deferred.succeed(release, undefined));
       await runtime.stop();
     }
   });

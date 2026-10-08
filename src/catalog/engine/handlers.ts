@@ -7,7 +7,7 @@ import { categoryIndexFromPublished, mapIndex, previewPath, searchIndexFromPubli
 import { enrichMap, readVariantDimensions } from "../metadata.ts";
 import { type CatalogPath, INDEX_FILE, type MapIndex, SEARCH_FILE } from "../model.ts";
 import { ensureDerivedImage, PREVIEW_MAX_SIZE, THUMBNAIL_MAX_SIZE, type DerivedImageKind } from "../thumbnail.ts";
-import { CategoryWork, type CatalogWork, ImageWork, MapWork, type PassContext, SearchWork } from "./work.ts";
+import { CategoryWork, type CatalogWork, ImageWork, imageWorkKey, MapWork, type PassContext, SearchWork } from "./work.ts";
 
 function parentOf(path: CatalogPath): CatalogPath {
   const slash = path.lastIndexOf("/");
@@ -15,15 +15,12 @@ function parentOf(path: CatalogPath): CatalogPath {
   return slash === -1 ? "" : path.slice(0, slash);
 }
 
-function imageFailureKey(map: MapNode, variant: FileListing, kind: DerivedImageKind): string {
-  return `image:${map.path}:${variant.name}:${kind}`;
-}
-
 function hasImageFailure(pass: PassContext, map: MapNode, variant: FileListing, kind: DerivedImageKind): boolean {
   const failures = new Set(pass.imageFailures.snapshot().map((failure) => failure.work));
 
   return (
-    failures.has(imageFailureKey(map, variant, kind)) || (kind === "thumbnail" && failures.has(imageFailureKey(map, variant, "preview")))
+    failures.has(imageWorkKey(map.path, variant.name, kind)) ||
+    (kind === "thumbnail" && failures.has(imageWorkKey(map.path, variant.name, "preview")))
   );
 }
 
@@ -39,7 +36,7 @@ function existingDerivedImages(map: MapNode, dataPath: string): Effect.Effect<Re
   ).pipe(Effect.map((keys) => new Set(keys.flat())));
 }
 
-function handleMap({ map, pass }: MapWork): Effect.Effect<readonly CatalogWork[], FileSystemError> {
+function handleMap({ map, pass, cascadeIndexes }: MapWork): Effect.Effect<readonly CatalogWork[], FileSystemError> {
   return Effect.gen(function* () {
     const dimensions = yield* readVariantDimensions([map], pass.filesPath);
     const enriched = yield* enrichMap(selectMapCover(map, pass.overrides, dimensions), pass.metadata, dimensions);
@@ -55,6 +52,8 @@ function handleMap({ map, pass }: MapWork): Effect.Effect<readonly CatalogWork[]
       JSON.stringify(mapIndex(enriched, hasDerivedImage, dimensions)),
     );
 
+    if (!cascadeIndexes) return [];
+
     const parent = pass.categories.get(parentOf(map.path));
 
     return [...(parent ? [new CategoryWork({ category: parent, pass })] : []), new SearchWork({ pass })];
@@ -64,7 +63,7 @@ function handleMap({ map, pass }: MapWork): Effect.Effect<readonly CatalogWork[]
 function handleImage({ map, variant, kind, pass }: ImageWork): Effect.Effect<readonly CatalogWork[], FileSystemError> {
   return Effect.gen(function* () {
     const original = join(pass.filesPath, map.sourcePath, variant.name);
-    const key = imageFailureKey(map, variant, kind);
+    const key = imageWorkKey(map.path, variant.name, kind);
 
     if (pass.beforeImageWork) yield* pass.beforeImageWork(map, variant, kind);
 
@@ -77,9 +76,10 @@ function handleImage({ map, variant, kind, pass }: ImageWork): Effect.Effect<rea
           join(pass.dataPath, previewPath(map.path, variant.name)),
           PREVIEW_MAX_SIZE,
           isAnimatedVariant(variant.name),
+          pass.force,
         );
 
-        return [new ImageWork({ map, variant, kind: "thumbnail", pass }), new MapWork({ map, pass })] as const;
+        return [new ImageWork({ map, variant, kind: "thumbnail", pass }), new MapWork({ map, pass, cascadeIndexes: true })] as const;
       }
 
       const preview = join(pass.dataPath, previewPath(map.path, variant.name));
@@ -91,9 +91,10 @@ function handleImage({ map, variant, kind, pass }: ImageWork): Effect.Effect<rea
         join(pass.dataPath, thumbnailPath(map.path, variant.name)),
         THUMBNAIL_MAX_SIZE,
         false,
+        pass.force,
       );
 
-      return [new MapWork({ map, pass })] as const;
+      return [new MapWork({ map, pass, cascadeIndexes: true })] as const;
     }).pipe(
       Effect.map((work) => ({ ok: true as const, work })),
       Effect.catch((error) => Effect.succeed({ ok: false as const, error })),
@@ -107,7 +108,7 @@ function handleImage({ map, variant, kind, pass }: ImageWork): Effect.Effect<rea
 
     pass.imageFailures.record(key, result.error.message);
 
-    return [new MapWork({ map, pass })];
+    return [new MapWork({ map, pass, cascadeIndexes: true })];
   });
 }
 

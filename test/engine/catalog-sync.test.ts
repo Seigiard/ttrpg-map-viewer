@@ -189,6 +189,7 @@ describe("catalog indexes built by the shared engine", () => {
 
   test("every variant in a published map index resolves to its original in the collection", async () => {
     // #given
+    await withSession(workspace, async () => undefined);
     const index = await readMapIndex(workspace.output, PIT);
 
     // #then

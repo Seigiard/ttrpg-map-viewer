@@ -12,7 +12,7 @@
     "format:fix": "oxfmt --write .",
     "fix": "bun run format:fix && bun run lint:fix",
     "typecheck": "tsc --noEmit",
-    "test": "LOG_LEVEL=error bun test test/unit",
+    "test": "LOG_LEVEL=error bun test test/unit test/engine",
     "test:docker": "docker compose -f docker-compose.test.yml run --rm test",
     "build:ui": "bun ui/scripts/build-ui.ts"
   },

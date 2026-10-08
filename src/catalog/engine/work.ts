@@ -14,13 +14,18 @@ export interface PassContext {
   readonly overrides: CoverOverrides;
   readonly metadata: MetadataSources;
   readonly imageFailures: ImageFailureRegistry;
+  readonly force: boolean;
   readonly beforeImageWork?: (map: MapNode, variant: FileListing, kind: DerivedImageKind) => Effect.Effect<void>;
   readonly beforeMapIndexWrite?: (map: MapNode, present: ReadonlySet<string>) => Effect.Effect<void>;
   readonly categories: ReadonlyMap<CatalogPath, CategoryNode>;
   readonly maps: readonly MapNode[];
 }
 
-export class MapWork extends Data.TaggedClass("MapWork")<{ readonly map: MapNode; readonly pass: PassContext }> {}
+export class MapWork extends Data.TaggedClass("MapWork")<{
+  readonly map: MapNode;
+  readonly pass: PassContext;
+  readonly cascadeIndexes: boolean;
+}> {}
 
 export class CategoryWork extends Data.TaggedClass("CategoryWork")<{ readonly category: CategoryNode; readonly pass: PassContext }> {}
 
@@ -35,6 +40,10 @@ export class ImageWork extends Data.TaggedClass("ImageWork")<{
 
 export type CatalogWork = MapWork | CategoryWork | SearchWork | ImageWork;
 
+export function imageWorkKey(mapPath: CatalogPath, variantName: string, kind: DerivedImageKind): string {
+  return JSON.stringify(["image", mapPath, variantName, kind]);
+}
+
 /** Equal keys combine while pending, so a category or the search index runs once after the maps it depends on. */
 export function workKey(work: CatalogWork): string {
   return Match.value(work).pipe(
@@ -42,7 +51,7 @@ export function workKey(work: CatalogWork): string {
       MapWork: ({ map }) => `map:${map.path}`,
       CategoryWork: ({ category }) => `category:${category.path}`,
       SearchWork: () => "search",
-      ImageWork: ({ map, variant, kind }) => `image:${map.path}:${variant.name}:${kind}`,
+      ImageWork: ({ map, variant, kind }) => imageWorkKey(map.path, variant.name, kind),
     }),
   );
 }

@@ -11,8 +11,8 @@ import type { DerivedImageKind } from "../thumbnail.ts";
 import { handleCatalogWork } from "./handlers.ts";
 import { createImageFailureRegistry, type ImageFailureRegistry } from "./image-status.ts";
 import { listingFromEntries } from "./listing.ts";
-import { catalogStatePath, includeCollectionSource } from "./policy.ts";
-import { CategoryWork, ImageWork, MapWork, SearchWork, type CatalogWork, workKey, type PassContext } from "./work.ts";
+import { catalogStatePath, includeObservableCollectionSource } from "./policy.ts";
+import { CategoryWork, ImageWork, imageWorkKey, MapWork, SearchWork, type CatalogWork, workKey, type PassContext } from "./work.ts";
 
 export interface CatalogSynchronizationOptions {
   readonly filesPath: string;
@@ -73,12 +73,14 @@ function logDiagnostics(listing: FolderListing, maps: readonly MapNode[]): void 
  */
 export function catalogLiveOptions(options: CatalogSynchronizationOptions): LiveOptions<CatalogWork, FileSystemError, never> {
   const imageFailures = options.imageFailures ?? createImageFailureRegistry();
+  const unobservableSources = new Set<string>();
 
   return {
     sourcePath: options.filesPath,
     outputPath: options.dataPath,
     statePath: catalogStatePath(options.dataPath),
-    includeSource: includeCollectionSource,
+    includeSource: (path) =>
+      includeObservableCollectionSource(options.filesPath, path, (unobservable) => unobservableSources.add(unobservable)),
     reconcileIntervalMs: options.reconcileIntervalMs,
     handle: handleCatalogWork,
     concurrency: options.thumbnailConcurrency,
@@ -90,9 +92,11 @@ export function catalogLiveOptions(options: CatalogSynchronizationOptions): Live
         Effect.catch(() => Effect.succeed(false)),
       ),
     },
-    declare: (entries: readonly SourceEntry[]) =>
+    declare: (entries: readonly SourceEntry[], request) =>
       Effect.gen(function* () {
         const startedAt = Date.now();
+        const preservePrefixes = [...unobservableSources];
+        unobservableSources.clear();
         const listing = listingFromEntries(entries);
         const { root } = classifyCollection(listing);
         const { categories, maps } = collectNodes(root);
@@ -110,24 +114,36 @@ export function catalogLiveOptions(options: CatalogSynchronizationOptions): Live
           overrides,
           metadata,
           imageFailures,
+          force: request.force,
           beforeImageWork: options.beforeImageWork,
           beforeMapIndexWrite: options.beforeMapIndexWrite,
           categories: new Map(categories.map((category) => [category.path, category])),
           maps,
         };
 
+        const declaredImageKeys = new Set(
+          maps.flatMap((map) =>
+            map.variants.flatMap((variant) => [
+              imageWorkKey(map.path, variant.name, "preview"),
+              imageWorkKey(map.path, variant.name, "thumbnail"),
+            ]),
+          ),
+        );
+
+        imageFailures.retain(declaredImageKeys);
+
         return {
           minimum: [new CategoryWork({ category: root, pass })],
           work: [
-            ...maps.map((map) => new MapWork({ map, pass })),
+            ...maps.map((map) => new MapWork({ map, pass, cascadeIndexes: false })),
+            ...categories.map((category) => new CategoryWork({ category, pass })),
+            new SearchWork({ pass }),
             ...maps.flatMap((map) => [
               new ImageWork({ map, variant: map.cover, kind: "preview", pass }),
               ...map.variants.flatMap((variant) => (variant === map.cover ? [] : [new ImageWork({ map, variant, kind: "preview", pass })])),
             ]),
-            ...categories.map((category) => new CategoryWork({ category, pass })),
-            new SearchWork({ pass }),
           ],
-          publish: expectedOutputManifest(categories, maps, options.dataPath, options.overridesPath).pipe(
+          publish: expectedOutputManifest(categories, maps, options.dataPath, options.overridesPath, preservePrefixes).pipe(
             Effect.andThen((manifest) => pruneOrphans(options.dataPath, manifest, startedAt)),
             Effect.tap(() =>
               Effect.sync(() => log.info("Generate", "Generation finished", { categories: categories.length, maps: maps.length })),
