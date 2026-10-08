@@ -66,7 +66,7 @@ function metadataBadges(metadata: Pick<MapMetadata, "author" | "mapSize">): HTML
 
 function breadcrumbs(path: CatalogPath): HTMLElement {
   const [root, ...rest] = breadcrumbTrail(path);
-  const nav = element("nav", { className: "breadcrumbs" }, navLink(root?.path ?? "", root?.label ?? ROOT_LABEL));
+  const nav = element("nav", { className: "breadcrumbs" }, navLink(root.path, root.label));
 
   for (const crumb of rest) nav.append(" / ", navLink(crumb.path, crumb.label));
 

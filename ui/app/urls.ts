@@ -71,7 +71,7 @@ export interface Breadcrumb {
 
 export const ROOT_LABEL = "Catalog";
 
-export function breadcrumbTrail(path: CatalogPath): readonly Breadcrumb[] {
+export function breadcrumbTrail(path: CatalogPath): readonly [Breadcrumb, ...Breadcrumb[]] {
   const segments = path === "" ? [] : path.split("/");
 
   return [
