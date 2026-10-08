@@ -127,7 +127,8 @@ function tokenize(text: string): Token[] {
 function toKey(tokens: Token[]): string {
   return tokens
     .flatMap((t) => {
-      const word = t.word.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+      // Parentheses stay: in packs "Dungeon, 4x1 (2)_001" and "Dungeon, 4x1_2_001" are different maps.
+      const word = t.word.toLowerCase().replace(/[^\p{L}\p{N}()]/gu, "");
 
       return word === "" ? [] : [word];
     })

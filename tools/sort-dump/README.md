@@ -25,6 +25,8 @@ Shorthands from the issue: `sort-dump <dumpDir>` is `plan`, `sort-dump --apply <
 
 Mount the collection at the **same path** inside the container, so the `dump:` path in the plan is valid both inside and outside. Run as your own user, or new map folders will belong to root.
 
+In zsh, brace a variable that is followed by a mount option: `-v "${B}:${B}:ro"`. Unbraced, `$B:r` is read as the zsh `:r` modifier.
+
 ```sh
 cd ~/ttrpg-map-viewer   # this repo
 docker run --rm --user "$(id -u):$(id -g)" \
@@ -83,7 +85,7 @@ Normalisation, in order:
 4. Remove a bare trailing author (`… [40x40] DnDavid.jpg`), but only an author that the same dump also names in parentheses.
 5. Split into words at spaces, `_`, `-`, `.` and CamelCase boundaries (`BaseDayGL` becomes `Base Day GL`).
 6. Drop the variant words `Grid Gridless Gridded NoGrid GL HD Day Night DUN VTT Overlay Kopie` (case-insensitive, whole words only).
-7. Compare the remaining words case-insensitively, without punctuation.
+7. Compare the remaining words case-insensitively, without punctuation except parentheses, so `Dungeon, 4x1 (2)_001` and `Dungeon, 4x1_2_001` stay apart.
 
 The folder name is the remaining text with its original casing and separators, for example `The Old Fishing Hole` or `1stFloor`. The `[WxH]` and `(Author)` parts stay in the file names, so the catalog can still read them.
 
