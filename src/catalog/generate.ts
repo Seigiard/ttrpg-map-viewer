@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import { log } from "../logging/index.ts";
 import {
   isAnimatedVariant,
@@ -128,6 +128,7 @@ function expectedOutputManifest(
   categories: readonly CategoryNode[],
   maps: readonly MapNode[],
   dataPath: string,
+  overridesPath: string,
 ): Effect.Effect<OutputManifest, FileSystemError> {
   const paths = new Set([
     SEARCH_FILE,
@@ -142,6 +143,12 @@ function expectedOutputManifest(
       ]),
     ]),
   ]);
+
+  const overridesRelativePath = relative(dataPath, overridesPath);
+
+  if (overridesRelativePath !== "" && !isAbsolute(overridesRelativePath) && !overridesRelativePath.startsWith("..")) {
+    paths.add(overridesRelativePath);
+  }
 
   return Effect.forEach(
     maps.flatMap((map) =>
@@ -168,6 +175,8 @@ function expectedOutputManifest(
       for (const path of printPaths.flat()) paths.add(path);
       const directories = new Set<string>();
 
+      for (const map of maps) directories.add(join(map.path, "_print"));
+
       for (const path of paths) {
         for (let slash = path.indexOf("/"); slash !== -1; slash = path.indexOf("/", slash + 1)) {
           directories.add(path.slice(0, slash));
@@ -179,7 +188,12 @@ function expectedOutputManifest(
   );
 }
 
-function pruneOrphans(dataPath: string, manifest: OutputManifest, relativePath = ""): Effect.Effect<void, FileSystemError> {
+function pruneOrphans(
+  dataPath: string,
+  manifest: OutputManifest,
+  passStartedAt: number,
+  relativePath = "",
+): Effect.Effect<void, FileSystemError> {
   const absolutePath = join(dataPath, relativePath);
 
   return Effect.gen(function* () {
@@ -194,10 +208,20 @@ function pruneOrphans(dataPath: string, manifest: OutputManifest, relativePath =
         if (entry.isDirectory()) {
           const hasExpectedChild = manifest.directories.has(childPath);
 
-          return hasExpectedChild ? pruneOrphans(dataPath, manifest, childPath) : removePath(childAbsolutePath);
+          return hasExpectedChild ? pruneOrphans(dataPath, manifest, passStartedAt, childPath) : removePath(childAbsolutePath);
         }
 
-        return manifest.paths.has(childPath) ? Effect.void : removePath(childAbsolutePath);
+        if (manifest.paths.has(childPath)) return Effect.void;
+
+        const isPrintFile = childPath.includes("/_print/");
+
+        if (!isPrintFile) return removePath(childAbsolutePath);
+
+        return mtimeOrNull(childAbsolutePath).pipe(
+          Effect.flatMap((mtime) =>
+            childPath.includes(".tmp") || (mtime !== null && mtime > passStartedAt) ? Effect.void : removePath(childAbsolutePath),
+          ),
+        );
       },
       { concurrency: INDEX_WRITE_CONCURRENCY, discard: true },
     );
@@ -209,12 +233,14 @@ function derivedImageKey(map: MapNode, variant: FileListing, kind: DerivedImageK
 }
 
 /**
- * Full one-shot generation: scan the collection, write folder indexes and global search data, then make derived images.
+ * A pass scans the Collection, writes indexes, renders derived images, writes search data, then prunes stale output.
  * Nothing is ever written under `filesPath`.
  */
 export function generateCatalog(options: GenerationOptions): Effect.Effect<GenerationSummary, FileSystemError> {
   return Effect.gen(function* () {
-    const listing = yield* scanCollection(options.filesPath);
+    const passStartedAt = Date.now();
+    const scan = yield* scanCollection(options.filesPath);
+    const { listing } = scan;
     const { root } = classifyCollection(listing);
 
     const { categories: unselectedCategories, maps: unselectedMaps } = collectNodes(root);
@@ -225,6 +251,21 @@ export function generateCatalog(options: GenerationOptions): Effect.Effect<Gener
 
     for (const map of likelyDumps) log.warn("Generate", "Likely dump", { path: map.sourcePath, variants: map.variants.length });
     log.info("Generate", "Collection diagnostics", { zipArchives: zipArchives.length, likelyDumps: likelyDumps.length });
+
+    if (unselectedMaps.length === 0) {
+      log.warn("Generate", "Collection has no maps; keeping existing catalog output", { files: options.filesPath });
+
+      return {
+        categories: unselectedCategories.length,
+        maps: 0,
+        thumbnailsCreated: 0,
+        thumbnailsFresh: 0,
+        thumbnailsFailed: 0,
+        previewsCreated: 0,
+        previewsFresh: 0,
+        previewsFailed: 0,
+      };
+    }
 
     const dimensions = yield* readVariantDimensions(unselectedMaps, options.filesPath);
     const selectedMaps = yield* selectMapCovers(unselectedMaps, options.overridesPath, dimensions);
@@ -331,11 +372,11 @@ export function generateCatalog(options: GenerationOptions): Effect.Effect<Gener
 
     yield* writeSearchIndex(options.dataPath, JSON.stringify(searchIndex(maps, hasDerivedImage)));
 
-    // An empty scan usually means the collection's mount is missing; pruning then would throw away hours of derived images.
-    if (maps.length === 0) log.warn("Generate", "Collection has no maps; keeping existing catalog output", { files: options.filesPath });
+    if (scan.hadReadFailure)
+      log.warn("Generate", "Scan had unreadable folders; keeping existing catalog output", { files: options.filesPath });
     else
-      yield* expectedOutputManifest(categories, maps, options.dataPath).pipe(
-        Effect.andThen((manifest) => pruneOrphans(options.dataPath, manifest)),
+      yield* expectedOutputManifest(categories, maps, options.dataPath, options.overridesPath).pipe(
+        Effect.andThen((manifest) => pruneOrphans(options.dataPath, manifest, passStartedAt)),
       );
 
     return {

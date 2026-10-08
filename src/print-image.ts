@@ -38,16 +38,24 @@ async function ensurePrintImage(original: string, destination: string, signature
   try {
     if (await isFresh(destination, signature)) return;
 
-    await mkdir(dirname(destination), { recursive: true });
-    const temporary = `${destination}.tmp.jpg`;
-    await sharp(original, { limitInputPixels: false })
-      .resize(PRINT_IMAGE_MAX_SIZE, PRINT_IMAGE_MAX_SIZE, { fit: "inside", withoutEnlargement: true })
-      .toColorspace("srgb")
-      .jpeg({ quality: 90, mozjpeg: true })
-      .toFile(temporary);
-    await rename(temporary, destination);
-    await Bun.write(`${destination}.source.json.tmp`, signature);
-    await rename(`${destination}.source.json.tmp`, `${destination}.source.json`);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await mkdir(dirname(destination), { recursive: true });
+        const temporary = `${destination}.tmp.jpg`;
+        await sharp(original, { limitInputPixels: false })
+          .resize(PRINT_IMAGE_MAX_SIZE, PRINT_IMAGE_MAX_SIZE, { fit: "inside", withoutEnlargement: true })
+          .toColorspace("srgb")
+          .jpeg({ quality: 90, mozjpeg: true })
+          .toFile(temporary);
+        await rename(temporary, destination);
+        await Bun.write(`${destination}.source.json.tmp`, signature);
+        await rename(`${destination}.source.json.tmp`, `${destination}.source.json`);
+
+        return;
+      } catch (error) {
+        if (attempt === 1 || !(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
+      }
+    }
   } finally {
     release();
   }
@@ -81,5 +89,5 @@ export async function printImageResponse(request: Request, storage: CatalogStora
     return new Response("Print image generation failed", { status: 500 });
   }
 
-  return Response.redirect(new URL(printImageUrl(path, variant.file), url), 302);
+  return new Response(null, { status: 302, headers: { Location: printImageUrl(path, variant.file) } });
 }

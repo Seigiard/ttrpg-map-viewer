@@ -26,7 +26,7 @@ export interface MapMetadata {
 export interface VariantMetadata {
   /** Image pixels per grid cell. */
   readonly gridScale?: number;
-  /** Present only when this Variant differs from its Map's map size. */
+  /** Grid metadata sources may set this even when it matches the Map's map size. */
   readonly mapSize?: MapSize;
 }
 
@@ -64,7 +64,7 @@ export interface SearchIndex {
 }
 
 export interface Variant extends VariantMetadata {
-  /** File name in the map folder; the original lives at the map path plus this name. */
+  /** File name under MapIndex.originalPath. */
   readonly file: string;
   readonly size: number;
   /** Pixel width of the Original, when its image header could be read. */

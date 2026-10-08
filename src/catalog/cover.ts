@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { log } from "../logging/index.ts";
 import { isAnimatedVariant, type FileListing, type MapNode } from "./classify.ts";
 import { readTextFile } from "./file-system.ts";
-import type { VariantDimensions } from "./metadata.ts";
+import { type VariantDimensions, variantKey } from "./metadata.ts";
 
 interface CoverOverrides {
   readonly covers: Readonly<Record<string, string>>;
@@ -41,10 +41,6 @@ function preferenceScore(name: string): number {
   return tokens.includes("night") ? preferred - 1_000 : preferred;
 }
 
-function variantKey(map: MapNode, variant: FileListing): string {
-  return `${map.sourcePath}\u0000${variant.name}`;
-}
-
 function pixelArea(map: MapNode, variant: FileListing, dimensions: VariantDimensions): number {
   const image = dimensions.get(variantKey(map, variant));
 
@@ -79,20 +75,16 @@ function loadOverrides(path: string): Effect.Effect<CoverOverrides, never> {
   );
 }
 
-function selectCover(map: MapNode, dimensions: VariantDimensions): Effect.Effect<FileListing, never> {
+function selectCover(map: MapNode, dimensions: VariantDimensions): FileListing {
   const stillVariants = map.variants.filter((variant) => !isAnimatedVariant(variant.name));
   const candidates = stillVariants.length > 0 ? stillVariants : map.variants;
 
-  return Effect.forEach(candidates, (variant) =>
-    Effect.succeed({ variant, score: preferenceScore(variant.name), area: pixelArea(map, variant, dimensions) } satisfies CoverCandidate),
-  ).pipe(
-    Effect.map(
-      (scored) =>
-        [...scored].sort(
-          (a, b) => b.score - a.score || b.area - a.area || a.variant.name.localeCompare(b.variant.name, "en", { sensitivity: "base" }),
-        )[0]!.variant,
-    ),
-  );
+  return candidates
+    .map(
+      (variant) => ({ variant, score: preferenceScore(variant.name), area: pixelArea(map, variant, dimensions) }) satisfies CoverCandidate,
+    )
+    .sort((a, b) => b.score - a.score || b.area - a.area || a.variant.name.localeCompare(b.variant.name, "en", { sensitivity: "base" }))[0]!
+    .variant;
 }
 
 /** Selects Covers after the Collection scan, including image metadata without decoding Originals. */
@@ -120,7 +112,7 @@ export function selectMapCovers(
         log.warn("Generate", "Cover override references a missing variant", { path: map.path, variant: overriddenVariant });
       }
 
-      return selectCover(map, dimensions).pipe(Effect.map((cover) => ({ ...map, cover })));
+      return Effect.succeed({ ...map, cover: selectCover(map, dimensions) });
     });
   });
 }

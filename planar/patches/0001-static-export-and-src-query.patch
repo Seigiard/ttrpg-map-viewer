@@ -62,8 +62,10 @@ index 7ca80e7..ff4311d 100644
 
 @@ -1158,12 +1150,12 @@ export default function PlanarApp() {
    // Shared image-creation routine used by file uploads, clipboard paste, and
-   // the built-in example gallery. Scales the image to fit inside the printable
-   // (margin-inset) area and packs it into the layout.
+-  // the built-in example gallery. Scales the image to fit inside the printable
+-  // (margin-inset) area and packs it into the layout.
++  // the built-in example gallery. Uncalibrated images scale to fit inside the
++  // printable (margin-inset) area; calibrated images keep their physical size.
 -  const addImageFromDataUrl = (dataUrl: string, name: string, type: string) => {
 +  const addImageFromDataUrl = (dataUrl: string, name: string, type: string, pixelsPerMm?: number) => {
      const img = new Image();

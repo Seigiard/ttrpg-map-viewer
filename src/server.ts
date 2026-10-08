@@ -47,7 +47,7 @@ const server = Bun.serve({
 
 log.info("Server", "Listening", { port: server.port });
 
-// A failed generation exits non-zero so Docker restarts the container instead of serving a stale catalog.
+// Only a failed initial generation exits non-zero; later regeneration failures are logged by the controller.
 void regeneration.start().catch((error: Error) => {
   log.error("Generate", "Generation failed", error);
   process.exit(1);

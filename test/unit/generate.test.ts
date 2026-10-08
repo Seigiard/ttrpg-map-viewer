@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 import { spawn } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
@@ -506,7 +506,7 @@ describe("generateCatalog", () => {
     expect(await Bun.file(join(catalog, "_thumbnails", "Day.jpg.webp")).exists()).toBe(false);
   });
 
-  test("keeps the existing catalog when a pass finds an empty collection", async () => {
+  test("keeps the existing catalog unchanged when a pass finds an empty collection", async () => {
     // #given
     const emptyCollection = join(workDir, "empty-collection");
     await mkdir(emptyCollection, { recursive: true });
@@ -522,11 +522,10 @@ describe("generateCatalog", () => {
         thumbnailConcurrency: 2,
       }),
     );
-    const derivedImagesAfter = (await snapshot(output)).filter((line) => line.includes("_thumbnails/") || line.includes("_previews/"));
+    const after = await snapshot(output);
 
     // #then
-    expect(derivedImagesAfter).toEqual(before.filter((line) => line.includes("_thumbnails/") || line.includes("_previews/")));
-    expect(derivedImagesAfter.length).toBeGreaterThan(0);
+    expect(after).toEqual(before);
   });
 
   test("regenerates a Variant restored with an older mtime", async () => {
@@ -545,21 +544,60 @@ describe("generateCatalog", () => {
     expect((await sharp(preview).metadata()).format).toBe("webp");
   });
 
+  test("keeps unreadable subfolder output when another Map lets a pass complete", async () => {
+    // #given
+    const inaccessible = join(collection, "Inaccessible");
+    const catalog = join(output, "Inaccessible", "Map");
+    await image(join(inaccessible, "Map", "Day.png"), TINY, TINY, "png");
+    await generate();
+    await chmod(inaccessible, 0o000);
+
+    // #when
+    try {
+      await generate();
+    } finally {
+      await chmod(inaccessible, 0o755);
+    }
+
+    // #then
+    expect(
+      await Promise.all([Bun.file(join(catalog, "index.json")).exists(), Bun.file(join(catalog, "_previews", "Day.png.webp")).exists()]),
+    ).toEqual([true, true]);
+  });
+
   test("prunes a cached Print image when its Original changes", async () => {
     // #given
     const original = join(collection, "Pack 09", "Ancient Ruins", "Ruins_BaseDayGL.png");
     const print = join(output, "Pack 09", "Ancient Ruins", "_print", "Ruins_BaseDayGL.png.jpg");
-    await printImageResponse(new Request("http://catalog/api/print-image?path=Pack%2009%2FAncient%20Ruins&variant=Ruins_BaseDayGL.png"), {
-      filesPath: collection,
-      dataPath: output,
-    });
+
+    const response = await printImageResponse(
+      new Request("http://catalog/api/print-image?path=Pack%2009%2FAncient%20Ruins&variant=Ruins_BaseDayGL.png"),
+      {
+        filesPath: collection,
+        dataPath: output,
+      },
+    );
+
+    const before = await Promise.all([Bun.file(print).exists(), Bun.file(`${print}.source.json`).exists()]);
+    await generate();
+    const freshAfterPass = await Promise.all([Bun.file(print).exists(), Bun.file(`${print}.source.json`).exists()]);
     await writeFile(original, await readFile(original));
 
     // #when
     await generate();
 
     // #then
-    expect(await Promise.all([Bun.file(print).exists(), Bun.file(`${print}.source.json`).exists()])).toEqual([false, false]);
+    expect({
+      status: response.status,
+      before,
+      freshAfterPass,
+      staleAfterPass: await Promise.all([Bun.file(print).exists(), Bun.file(`${print}.source.json`).exists()]),
+    }).toEqual({
+      status: 302,
+      before: [true, true],
+      freshAfterPass: [true, true],
+      staleAfterPass: [false, false],
+    });
   });
 
   test("enriches DnDavid names and Dungeondraft exports without adding metadata to unrelated Maps", async () => {
@@ -571,6 +609,7 @@ describe("generateCatalog", () => {
       join(collection, "Pack 09", "Achlys Manor", "1stFloorVTT.dd2vtt"),
       JSON.stringify({ resolution: { map_size: { x: 55, y: 65 }, pixels_per_grid: 140 } }),
     );
+    await writeFile(join(collection, "Pack 09", "Achlys Manor", "Broken.dd2vtt"), '{"resolution":');
 
     // #when
     await generate();
@@ -588,6 +627,8 @@ describe("generateCatalog", () => {
       expect.objectContaining({ file: "1stFloor Day.png", gridScale: 140, mapSize: { width: 55, height: 65 } }),
       expect.objectContaining({ file: "Basement Day.png" }),
     ]);
+    expect(achlys.variants[1]).not.toHaveProperty("gridScale");
+    expect(achlys.variants[1]).not.toHaveProperty("mapSize");
     expect(unrelated).toEqual({
       kind: "map",
       name: "Ancient Ruins",
@@ -606,6 +647,18 @@ describe("generateCatalog", () => {
         },
       ],
     });
+  });
+
+  test("ignores wrong-shaped Czepeku metadata without failing generation", async () => {
+    // #given
+    await writeFile(join(collection, "czepuku", "czepeku_data.json"), "{}");
+
+    // #when
+    await generate();
+    const map = await readJson<MapIndex>(join(output, "czepuku", "CZEPEKU Fantasy Maps", "Monster Fighting Pit", "index.json"));
+
+    // #then
+    expect(map.author).toBeUndefined();
   });
 });
 

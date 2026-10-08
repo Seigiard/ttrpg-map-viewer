@@ -143,7 +143,17 @@ function searchHeader(): HTMLElement {
   };
 
   const load = async () => {
-    loading ??= loadSearchIndex();
+    loading ??= loadSearchIndex().then(
+      (result) => {
+        if (result === null) loading = undefined;
+
+        return result;
+      },
+      (error) => {
+        loading = undefined;
+        throw error;
+      },
+    );
     index = await loading;
   };
 

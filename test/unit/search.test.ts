@@ -9,7 +9,7 @@ const maps: readonly SearchMap[] = [
     categoryPath: ["Czepeku", "Underground"],
     thumbnail: "Czepeku/Underground/Cavern Entrance/_thumbnails/Day.jpg.webp",
     variantCount: 2,
-    author: "Czepeku",
+    author: "Elara Voss",
     tags: ["Maps & Scenes"],
   },
   {
@@ -35,7 +35,7 @@ describe("filterSearchMaps", () => {
 
   test("finds Maps by Author and tags", () => {
     // #given
-    const query = "czepeku scenes";
+    const query = "elara scenes";
 
     // #when
     const results = filterSearchMaps(maps, query);

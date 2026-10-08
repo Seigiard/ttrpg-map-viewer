@@ -7,6 +7,8 @@ import type { FileListing, FolderListing, MapNode } from "./classify.ts";
 import { readTextFile } from "./file-system.ts";
 import type { MapMetadata, MapSize, VariantMetadata } from "./model.ts";
 
+/* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- Third-party JSON is validated at this parse boundary before it enters the catalog domain. */
+
 export interface ImageDimensions {
   readonly width: number;
   readonly height: number;
@@ -38,7 +40,7 @@ interface FilenameMetadata {
   readonly variant?: VariantMetadata;
 }
 
-function variantKey(map: MapNode, variant: FileListing): string {
+export function variantKey(map: MapNode, variant: FileListing): string {
   return `${map.sourcePath}\u0000${variant.name}`;
 }
 
@@ -70,10 +72,42 @@ function parseGrid(grid: string): VariantMetadata {
   return Number.isFinite(scale) && scale > 0 ? { mapSize, gridScale: scale } : {};
 }
 
+function isCzepekuEntry(value: unknown): value is CzepekuEntry {
+  if (typeof value !== "object" || value === null) return false;
+  const entry = value as Record<string, unknown>;
+
+  return (
+    typeof entry.name === "string" &&
+    Array.isArray(entry.cats) &&
+    entry.cats.every((category: unknown) => typeof category === "string") &&
+    Array.isArray(entry.maps) &&
+    entry.maps.every(
+      (variant: unknown) =>
+        typeof variant === "object" &&
+        variant !== null &&
+        typeof (variant as Record<string, unknown>).name === "string" &&
+        typeof (variant as Record<string, unknown>).grid === "string",
+    )
+  );
+}
+
 function parseCzepeku(content: string, path: string): readonly CzepekuEntry[] {
   try {
-    // SAFETY: Czepeku publishes this array with the documented entry fields; malformed JSON is rejected below.
-    return JSON.parse(content) as CzepekuEntry[];
+    const parsed: unknown = JSON.parse(content);
+
+    if (!Array.isArray(parsed)) throw new Error("metadata must be an array");
+
+    return parsed.flatMap((entry) => {
+      if (!isCzepekuEntry(entry)) {
+        log.warn("Generate", "Invalid Czepeku metadata entry", { path });
+
+        return [];
+      }
+
+      const type = entry.type === "map" || entry.type === "scene" || entry.type === "None" ? entry.type : "None";
+
+      return [{ name: entry.name, type, cats: entry.cats, maps: entry.maps }];
+    });
   } catch {
     log.warn("Generate", "Invalid Czepeku metadata file", { path });
 
@@ -81,31 +115,46 @@ function parseCzepeku(content: string, path: string): readonly CzepekuEntry[] {
   }
 }
 
-function readCzepekuMetadata(listing: FolderListing, filesPath: string): Effect.Effect<readonly CzepekuEntry[], never> {
+interface MetadataListing {
+  readonly czepekuPath?: string;
+  readonly czepekuDirectory?: string;
+  readonly folders: ReadonlyMap<string, FolderListing>;
+}
+
+function collectMetadataListing(listing: FolderListing, filesPath: string): MetadataListing {
   const pending = [listing];
+  const folders = new Map<string, FolderListing>();
+  let czepekuPath: string | undefined;
+  let czepekuDirectory: string | undefined;
 
   for (let folder = pending.pop(); folder; folder = pending.pop()) {
+    folders.set(folder.path, folder);
     const dataFile = folder.files.find((file) => normalized(file.name) === "czepeku_data.json");
 
-    if (dataFile) {
-      const path = join(filesPath, folder.path, dataFile.name);
-
-      return readTextFile(path).pipe(
-        Effect.map((content) => parseCzepeku(content, path)),
-        Effect.catch(() =>
-          Effect.sync(() => {
-            log.warn("Generate", "Could not read Czepeku metadata file", { path });
-
-            return [];
-          }),
-        ),
-      );
+    if (dataFile && !czepekuPath) {
+      czepekuPath = join(filesPath, folder.path, dataFile.name);
+      czepekuDirectory = folder.path;
     }
 
     pending.push(...folder.subfolders);
   }
 
-  return Effect.succeed([]);
+  return { czepekuPath, czepekuDirectory, folders };
+}
+
+function readCzepekuMetadata(path: string | undefined): Effect.Effect<readonly CzepekuEntry[], never> {
+  if (!path) return Effect.succeed([]);
+
+  return readTextFile(path).pipe(
+    Effect.map((content) => parseCzepeku(content, path)),
+    Effect.catch(() =>
+      Effect.sync(() => {
+        log.warn("Generate", "Could not read Czepeku metadata file", { path });
+
+        return [];
+      }),
+    ),
+  );
 }
 
 /** Reads image headers once for both Cover selection and filename-derived grid scale. */
@@ -208,6 +257,20 @@ function dungeondraftStem(name: string): string {
   return normalized(stem(name).replace(/vtt$/iu, ""));
 }
 
+function parseDungeondraft(content: string, path: string): DungeondraftExport | undefined {
+  try {
+    const parsed: unknown = JSON.parse(content);
+
+    if (typeof parsed === "object" && parsed !== null) return parsed as DungeondraftExport;
+  } catch {
+    // Falls through to the warning below.
+  }
+
+  log.warn("Generate", "Invalid Dungeondraft export", { path });
+
+  return undefined;
+}
+
 function dungeondraftMetadata(map: MapNode, folder: FolderListing | undefined, filesPath: string): Effect.Effect<MapNode, never> {
   if (!folder) return Effect.succeed(map);
   const exports = folder.files.filter((file) => file.name.toLowerCase().endsWith(".dd2vtt"));
@@ -215,8 +278,9 @@ function dungeondraftMetadata(map: MapNode, folder: FolderListing | undefined, f
   return Effect.forEach(exports, (file) =>
     readTextFile(join(filesPath, folder.path, file.name)).pipe(
       Effect.map((content) => {
-        // SAFETY: Dungeondraft exports use the documented resolution fields; malformed exports are ignored by the read boundary.
-        return { file, parsed: JSON.parse(content) as DungeondraftExport };
+        const parsed = parseDungeondraft(content, join(filesPath, folder.path, file.name));
+
+        return parsed ? { file, parsed } : undefined;
       }),
       Effect.catch(() => Effect.succeed(undefined)),
     ),
@@ -255,33 +319,17 @@ export function enrichMapMetadata(
   dimensions: VariantDimensions,
 ): Effect.Effect<readonly MapNode[], never> {
   return Effect.gen(function* () {
-    const czepeku = yield* readCzepekuMetadata(listing, filesPath);
-
-    const dataDirectory = (() => {
-      const pending = [listing];
-
-      for (let folder = pending.pop(); folder; folder = pending.pop()) {
-        if (folder.files.some((file) => normalized(file.name) === "czepeku_data.json")) return folder.path;
-        pending.push(...folder.subfolders);
-      }
-
-      return undefined;
-    })();
-
-    const folders = new Map<string, FolderListing>();
-    const pending = [listing];
-
-    for (let folder = pending.pop(); folder; folder = pending.pop()) {
-      folders.set(folder.path, folder);
-      pending.push(...folder.subfolders);
-    }
+    const metadataListing = collectMetadataListing(listing, filesPath);
+    const czepeku = yield* readCzepekuMetadata(metadataListing.czepekuPath);
 
     return yield* Effect.forEach(maps, (map) =>
       dungeondraftMetadata(
-        czepekuMetadata(filenameMetadata(map, dimensions), czepeku, dataDirectory ?? "\u0000"),
-        folders.get(map.sourcePath),
+        czepekuMetadata(filenameMetadata(map, dimensions), czepeku, metadataListing.czepekuDirectory ?? "\u0000"),
+        metadataListing.folders.get(map.sourcePath),
         filesPath,
       ),
     );
   });
 }
+
+/* oxlint-enable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion */

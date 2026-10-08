@@ -49,8 +49,8 @@ describe("printImageResponse", () => {
       metadata: await sharp(print).metadata(),
       mtime: (await stat(print)).mtimeMs,
     }).toEqual({
-      first: [302, "http://catalog/_catalog/Map/_print/Huge.png.jpg"],
-      second: [302, "http://catalog/_catalog/Map/_print/Huge.png.jpg"],
+      first: [302, "/_catalog/Map/_print/Huge.png.jpg"],
+      second: [302, "/_catalog/Map/_print/Huge.png.jpg"],
       metadata: expect.objectContaining({ format: "jpeg", width: 12_000, height: 923 }),
       mtime: firstMtime,
     });
@@ -62,6 +62,10 @@ describe("printImageResponse", () => {
     const filesPath = join(root, "collection");
     const dataPath = join(root, "catalog");
     await mkdir(join(dataPath, "Map"), { recursive: true });
+    await mkdir(join(filesPath, "Map"), { recursive: true });
+    await sharp({ create: { width: 1, height: 1, channels: 3, background: "red" } })
+      .png()
+      .toFile(join(filesPath, "Map", "Unknown.png"));
     await writeFile(join(dataPath, "Map", "index.json"), JSON.stringify({ kind: "map", originalPath: "Map", variants: [] }));
 
     // #when

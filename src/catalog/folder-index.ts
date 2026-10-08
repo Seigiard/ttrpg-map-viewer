@@ -1,5 +1,5 @@
 import { isAnimatedVariant, type CategoryNode, type FileListing, type MapNode } from "./classify.ts";
-import type { VariantDimensions } from "./metadata.ts";
+import { type VariantDimensions, variantKey } from "./metadata.ts";
 import type { CatalogPath, CategoryIndex, Cover, MapIndex, SearchIndex } from "./model.ts";
 
 /** Leading underscore keeps derived files apart from mirrored folder names, which come from the collection. */
@@ -57,7 +57,7 @@ export function mapIndex(map: MapNode, hasDerivedImage: DerivedImageAvailability
     cover: coverOf(map, hasDerivedImage),
     ...map.metadata,
     variants: map.variants.map((variant) => {
-      const dimensionsForVariant = dimensions.get(`${map.sourcePath}\u0000${variant.name}`);
+      const dimensionsForVariant = dimensions.get(variantKey(map, variant));
 
       return {
         file: variant.name,
