@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { acquireOutputTree } from "@seigiard/sync-engine";
-import { Effect, Exit } from "effect";
+import { Deferred, Effect, Exit } from "effect";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { openCatalogSynchronization } from "../../src/catalog/engine/composition.ts";
+import { openCatalogSynchronization, startCatalogSynchronization } from "../../src/catalog/engine/composition.ts";
 import { startEngineRuntime } from "../../src/catalog/engine/runtime.ts";
 import type { CategoryIndex, MapIndex, SearchIndex } from "../../src/catalog/model.ts";
+import { ownedPromise } from "../../src/utils/owned-promise.ts";
 import { createWorkspace, image, LAKESIDE, PIT, type Workspace } from "./collection-fixture.ts";
 import { passOf, sessionOptions, withSession } from "./session.ts";
 
@@ -207,6 +208,64 @@ describe("failures", () => {
       await runtime.stop();
     }
   });
+
+  test("same-map preview and thumbnail republishes leave the final index with both references", async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          // #given
+          const entered = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          const separator = String.fromCharCode(0);
+          let held = false;
+
+          const session = yield* startCatalogSynchronization({
+            ...sessionOptions(workspace),
+            beforeImageWork: (map, variant, kind) =>
+              map.path === PIT && variant.name === "Empty Day.jpg" && kind === "thumbnail" ? Deferred.await(entered) : Effect.void,
+            beforeMapIndexWrite: (map, present) => {
+              const hasPreview = present.has(`Empty Day.jpg${separator}preview`);
+              const hasThumbnail = present.has(`Empty Day.jpg${separator}thumbnail`);
+
+              if (held || map.path !== PIT || !hasPreview || hasThumbnail) return Effect.void;
+              held = true;
+
+              return Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)));
+            },
+          });
+
+          yield* Deferred.await(entered);
+
+          for (let attempt = 0; attempt < 50; attempt += 1) {
+            const published = yield* ownedPromise(
+              () => exists(join(workspace.output, PIT, "_thumbnails", "Empty Day.jpg.webp")),
+              (cause) => new Error(String(cause)),
+            );
+
+            if (published) break;
+
+            if (attempt === 49) {
+              return yield* Effect.fail(new Error("thumbnail did not publish while the first map republish was held"));
+            }
+
+            yield* Effect.sleep(10);
+          }
+
+          // #when
+          yield* Deferred.succeed(release, undefined);
+          yield* session.awaitCompletion;
+        }),
+      ),
+    );
+
+    // #then
+    const variant = (await readJson<MapIndex>(join(workspace.output, PIT, "index.json"))).variants.find(
+      (candidate) => candidate.file === "Empty Day.jpg",
+    );
+
+    expect(variant?.preview).toBe(`${PIT}/_previews/Empty Day.jpg.webp`);
+    expect(variant?.thumbnail).toBe(`${PIT}/_thumbnails/Empty Day.jpg.webp`);
+  }, 15_000);
 });
 
 describe("output ownership", () => {

@@ -1,11 +1,12 @@
 import { openLiveSynchronization, startLiveSynchronization, type LiveOptions, type SourceEntry } from "@seigiard/sync-engine";
 import { Effect } from "effect";
 import { log } from "../../logging/index.ts";
-import { classifyCollection, type CategoryNode, type FolderListing, type MapNode } from "../classify.ts";
+import { classifyCollection, type CategoryNode, type FileListing, type FolderListing, type MapNode } from "../classify.ts";
 import { loadCoverOverrides, warnUnknownCoverOverrides } from "../cover.ts";
 import type { FileSystemError } from "../file-system.ts";
 import { loadMetadataSources } from "../metadata.ts";
 import { expectedOutputManifest, pruneOrphans } from "../output-manifest.ts";
+import type { DerivedImageKind } from "../thumbnail.ts";
 import { handleCatalogWork } from "./handlers.ts";
 import { createImageFailureRegistry, type ImageFailureRegistry } from "./image-status.ts";
 import { listingFromEntries } from "./listing.ts";
@@ -18,6 +19,8 @@ export interface CatalogSynchronizationOptions {
   readonly overridesPath: string;
   readonly thumbnailConcurrency: number;
   readonly imageFailures?: ImageFailureRegistry;
+  readonly beforeImageWork?: (map: MapNode, variant: FileListing, kind: DerivedImageKind) => Effect.Effect<void>;
+  readonly beforeMapIndexWrite?: (map: MapNode, present: ReadonlySet<string>) => Effect.Effect<void>;
   /** Zero disables the engine's periodic reconciliation. */
   readonly reconcileIntervalMs: number;
 }
@@ -107,6 +110,8 @@ export function catalogLiveOptions(options: CatalogSynchronizationOptions): Live
           overrides,
           metadata,
           imageFailures,
+          beforeImageWork: options.beforeImageWork,
+          beforeMapIndexWrite: options.beforeMapIndexWrite,
           categories: new Map(categories.map((category) => [category.path, category])),
           maps,
         };

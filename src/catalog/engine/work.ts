@@ -1,4 +1,4 @@
-import { Data, Match } from "effect";
+import { Data, Effect, Match } from "effect";
 import type { CategoryNode, FileListing, FolderListing, MapNode } from "../classify.ts";
 import type { CoverOverrides } from "../cover.ts";
 import type { MetadataSources } from "../metadata.ts";
@@ -14,6 +14,8 @@ export interface PassContext {
   readonly overrides: CoverOverrides;
   readonly metadata: MetadataSources;
   readonly imageFailures: ImageFailureRegistry;
+  readonly beforeImageWork?: (map: MapNode, variant: FileListing, kind: DerivedImageKind) => Effect.Effect<void>;
+  readonly beforeMapIndexWrite?: (map: MapNode, present: ReadonlySet<string>) => Effect.Effect<void>;
   readonly categories: ReadonlyMap<CatalogPath, CategoryNode>;
   readonly maps: readonly MapNode[];
 }

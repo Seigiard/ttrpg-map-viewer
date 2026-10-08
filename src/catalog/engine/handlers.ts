@@ -48,6 +48,8 @@ function handleMap({ map, pass }: MapWork): Effect.Effect<readonly CatalogWork[]
     const hasDerivedImage = (candidate: MapNode, variant: FileListing, kind: DerivedImageKind) =>
       !hasImageFailure(pass, candidate, variant, kind) && present.has(`${variant.name}\u0000${kind}`);
 
+    if (pass.beforeMapIndexWrite) yield* pass.beforeMapIndexWrite(enriched, present);
+
     yield* writeTextFileIfChanged(
       join(pass.dataPath, enriched.path, INDEX_FILE),
       JSON.stringify(mapIndex(enriched, hasDerivedImage, dimensions)),
@@ -63,6 +65,8 @@ function handleImage({ map, variant, kind, pass }: ImageWork): Effect.Effect<rea
   return Effect.gen(function* () {
     const original = join(pass.filesPath, map.sourcePath, variant.name);
     const key = imageFailureKey(map, variant, kind);
+
+    if (pass.beforeImageWork) yield* pass.beforeImageWork(map, variant, kind);
 
     const result = yield* Effect.gen(function* () {
       if (kind === "preview") {
