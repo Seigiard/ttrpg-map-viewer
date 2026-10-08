@@ -3,8 +3,9 @@ import { Effect } from "effect";
 import { log } from "../../logging/index.ts";
 import { classifyCollection, type CategoryNode, type FileListing, type FolderListing, type MapNode } from "../classify.ts";
 import { loadCoverOverrides, warnUnknownCoverOverrides } from "../cover.ts";
-import type { FileSystemError } from "../file-system.ts";
+import { mtimeOrNull, type FileSystemError } from "../file-system.ts";
 import { loadMetadataSources } from "../metadata.ts";
+import { INDEX_FILE } from "../model.ts";
 import { expectedOutputManifest, pruneOrphans } from "../output-manifest.ts";
 import type { DerivedImageKind } from "../thumbnail.ts";
 import { handleCatalogWork } from "./handlers.ts";
@@ -83,6 +84,12 @@ export function catalogLiveOptions(options: CatalogSynchronizationOptions): Live
     concurrency: options.thumbnailConcurrency,
     key: workKey,
     failureKey: workKey,
+    recovery: {
+      existing: mtimeOrNull(`${options.dataPath}/${INDEX_FILE}`).pipe(
+        Effect.map((mtime) => mtime !== null),
+        Effect.catch(() => Effect.succeed(false)),
+      ),
+    },
     declare: (entries: readonly SourceEntry[]) =>
       Effect.gen(function* () {
         const startedAt = Date.now();
@@ -91,13 +98,6 @@ export function catalogLiveOptions(options: CatalogSynchronizationOptions): Live
         const { categories, maps } = collectNodes(root);
 
         logDiagnostics(listing, maps);
-
-        // The existing catalog stays when a readable collection has no maps (changed deliberately in the production switch).
-        if (maps.length === 0) {
-          log.warn("Generate", "Collection has no maps; keeping existing catalog output", { files: options.filesPath });
-
-          return { work: [], publish: Effect.void };
-        }
 
         const overrides = yield* loadCoverOverrides(options.overridesPath);
         warnUnknownCoverOverrides(maps, overrides);
@@ -117,6 +117,7 @@ export function catalogLiveOptions(options: CatalogSynchronizationOptions): Live
         };
 
         return {
+          minimum: [new CategoryWork({ category: root, pass })],
           work: [
             ...maps.map((map) => new MapWork({ map, pass })),
             ...maps.flatMap((map) => [

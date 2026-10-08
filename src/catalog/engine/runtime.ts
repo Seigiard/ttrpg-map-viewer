@@ -18,6 +18,11 @@ export interface EngineRuntime {
 }
 
 export interface EngineStatus {
+  readonly available: boolean;
+  readonly availableFrom: string | null;
+  readonly verifying: boolean;
+  readonly completed: boolean;
+  readonly errors: readonly { readonly source: "work" | "pass"; readonly message: string }[];
   readonly state: string;
   readonly pass: string | null;
   readonly followUp: string | null;
@@ -45,29 +50,34 @@ export function startEngineRuntime(options: CatalogSynchronizationOptions): Engi
     Effect.gen(function* () {
       const status = yield* live.status;
 
+      const workErrors = [
+        ...status.work.errors.map((error) => ({ work: workKey(error.work), message: firstLine(error.cause) })),
+        ...imageFailures.snapshot(),
+      ];
+
+      const workState = status.work.state === "complete" && workErrors.length > 0 ? "complete-with-errors" : status.work.state;
+      const verifying = status.state === "working" || status.pass !== null || status.followUp !== null || workState === "working";
+
       return {
+        available: status.availability !== null,
+        availableFrom: status.availability,
+        verifying,
+        completed: !verifying && (workState === "complete" || workState === "complete-with-errors"),
+        errors: [
+          ...workErrors.map((error) => ({ source: "work" as const, message: `${error.work}: ${error.message}` })),
+          ...(status.failure ? [{ source: "pass" as const, message: firstLine(status.failure) }] : []),
+        ],
         state: status.state,
         pass: status.pass?.kind ?? null,
         followUp: status.followUp?.kind ?? null,
         failure: status.failure ? firstLine(status.failure) : null,
         work: {
-          state: status.work.state,
+          state: workState,
           pending: status.work.pending,
-          errors: [
-            ...status.work.errors.map((error) => ({ work: workKey(error.work), message: firstLine(error.cause) })),
-            ...imageFailures.snapshot(),
-          ],
+          errors: workErrors,
         },
       } satisfies EngineStatus;
-    }).pipe(
-      Effect.map((status) => ({
-        ...status,
-        work: {
-          ...status.work,
-          state: status.work.state === "complete" && status.work.errors.length > 0 ? "complete-with-errors" : status.work.state,
-        },
-      })),
-    );
+    });
 
   // Reports each distinct failure once; it observes the session and schedules nothing.
   const report = (live: Effect.Success<ReturnType<typeof startCatalogSynchronization>>) => {

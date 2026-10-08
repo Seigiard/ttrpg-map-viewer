@@ -122,6 +122,30 @@ describe("a later pass in the same engine session", () => {
     // #then
     expect(await Promise.all(files.map((path) => stat(path).then(({ mtimeMs }) => mtimeMs)))).toEqual(before);
   });
+
+  test("a readable empty source publishes an empty root catalog and prunes stale map output", async () => {
+    // #given
+    await withSession(workspace, async (session) => {
+      expect(await searchPaths()).toContain(PIT);
+
+      // #when
+      await rm(workspace.collection, { recursive: true });
+      await mkdir(workspace.collection);
+      await passOf(session);
+    });
+
+    // #then
+    expect(await readJson<CategoryIndex>(join(workspace.output, "index.json"))).toEqual({
+      kind: "category",
+      name: "",
+      path: "",
+      categories: [],
+      maps: [],
+    });
+    expect(await readJson<SearchIndex>(join(workspace.output, "search.json"))).toEqual({ maps: [] });
+    expect(await exists(join(workspace.output, PIT))).toBe(false);
+    expect(await exists(join(workspace.output, ".sync-engine"))).toBe(true);
+  });
 });
 
 describe("failures", () => {
@@ -184,6 +208,50 @@ describe("failures", () => {
       // #then
       expect((await Effect.runPromise(session.status)).failure).toBeNull();
     });
+  });
+
+  test("a warm source failure remains available and reports pass errors until recovery", async () => {
+    // #given
+    await withSession(workspace, async () => undefined);
+    const moved = `${workspace.collection}-away`;
+    await rename(workspace.collection, moved);
+    const runtime = startEngineRuntime(sessionOptions(workspace));
+
+    try {
+      // #when
+      await runtime.ready;
+      const failed = await runtime.status();
+
+      // #then
+      expect(failed.available).toBe(true);
+      expect(failed.availableFrom).toBe("prior-output");
+      expect(failed.completed).toBe(false);
+      expect(failed.errors.map((error) => error.source)).toContain("pass");
+      expect(await searchPaths()).toContain(PIT);
+
+      // #when
+      await rename(moved, workspace.collection);
+      await runtime.requestPass();
+
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        const status = await runtime.status();
+
+        if (status.completed && status.errors.length === 0) break;
+
+        if (attempt === 49) throw new Error("runtime did not recover after the source was restored");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+
+      // #then
+      const recovered = await runtime.status();
+      expect(recovered.available).toBe(true);
+      expect(recovered.completed).toBe(true);
+      expect(recovered.errors).toEqual([]);
+    } finally {
+      await runtime.stop();
+
+      if (!(await exists(workspace.collection))) await rename(moved, workspace.collection);
+    }
   });
 
   test("a derived image failure stays visible while unrelated images publish", async () => {
@@ -265,6 +333,49 @@ describe("failures", () => {
 
     expect(variant?.preview).toBe(`${PIT}/_previews/Empty Day.jpg.webp`);
     expect(variant?.thumbnail).toBe(`${PIT}/_thumbnails/Empty Day.jpg.webp`);
+  }, 15_000);
+
+  test("a source change received during a running pass is published by a follow-up pass", async () => {
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          // #given
+          const held = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          let hasHeld = false;
+
+          const session = yield* startCatalogSynchronization({
+            ...sessionOptions(workspace),
+            beforeMapIndexWrite: (map) => {
+              if (hasHeld || map.path !== PIT) return Effect.void;
+              hasHeld = true;
+
+              return Effect.gen(function* () {
+                yield* Deferred.succeed(held, undefined);
+                yield* Deferred.await(release);
+              });
+            },
+          });
+
+          yield* Deferred.await(held);
+          yield* ownedPromise(
+            () => image(join(workspace.collection, "Pack 09", "Held Change", "Held.png"), 40, 40, "png"),
+            (cause) => new Error(String(cause)),
+          );
+
+          // #when
+          yield* session.requestPass({ force: false });
+          yield* Deferred.succeed(release, undefined);
+          yield* session.awaitCompletion;
+        }),
+      ),
+    );
+
+    // #then
+    expect(await searchPaths()).toContain("Pack 09/Held Change");
+    expect(
+      (await readJson<MapIndex>(join(workspace.output, "Pack 09", "Held Change", "index.json"))).variants.map((variant) => variant.file),
+    ).toEqual(["Held.png"]);
   }, 15_000);
 });
 

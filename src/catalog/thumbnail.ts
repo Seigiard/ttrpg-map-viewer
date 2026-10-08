@@ -22,8 +22,10 @@ export class DerivedImageFailure extends Data.TaggedError("DerivedImageFailure")
 
 export type DerivedImageOutcome = "created" | "fresh";
 
+const DERIVED_IMAGE_PROCESSING_VERSION = "1";
+
 export function sourceSignature(mtimeMs: number, size: number): string {
-  return JSON.stringify({ mtimeMs, size });
+  return JSON.stringify({ mtimeMs, size, version: DERIVED_IMAGE_PROCESSING_VERSION });
 }
 
 function sourceSignaturePath(destination: string): string {

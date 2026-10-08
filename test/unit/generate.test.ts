@@ -6,7 +6,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
 import { generateCatalog, type GenerationSummary } from "../../src/catalog/generate.ts";
-import { RegenerationController } from "../../src/catalog/regeneration.ts";
 import type { CategoryIndex, MapIndex, SearchIndex } from "../../src/catalog/model.ts";
 import { printImageResponse } from "../../src/print-image.ts";
 
@@ -659,41 +658,5 @@ describe("generateCatalog", () => {
 
     // #then
     expect(map.author).toBeUndefined();
-  });
-});
-
-describe("RegenerationController", () => {
-  test("coalesces triggers that arrive while a regeneration pass is running", async () => {
-    // #given
-    let releaseFirstPass: (() => void) | undefined;
-    let calls = 0;
-
-    const firstPass = new Promise<void>((resolve) => {
-      releaseFirstPass = resolve;
-    });
-
-    const controller = new RegenerationController({
-      debounceMs: 0,
-      reconcileIntervalMs: 60_000,
-      regenerate: async () => {
-        calls += 1;
-
-        if (calls === 1) await firstPass;
-      },
-      onError: () => undefined,
-    });
-
-    // #when
-    const initial = controller.start();
-    controller.trigger();
-    controller.trigger();
-    await Bun.sleep(10);
-    releaseFirstPass?.();
-    await initial;
-    await Bun.sleep(10);
-    controller.stop();
-
-    // #then
-    expect(calls).toBe(2);
   });
 });

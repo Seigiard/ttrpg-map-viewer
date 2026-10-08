@@ -5,7 +5,7 @@
     "": {
       "name": "ttrpg-map-viewer",
       "dependencies": {
-        "@seigiard/sync-engine": "file:vendor/seigiard-sync-engine-0.5.0-59bdbe98.tgz",
+        "@seigiard/sync-engine": "0.5.0",
         "client-zip": "^2.5.1",
         "effect": "4.0.1",
         "sharp": "^0.35.5",
@@ -154,7 +154,7 @@
 
     "@oxlint/plugins": ["@oxlint/plugins@1.87.0", "", {}, "sha512-OtSZ6NxNkS7bkVy7zk9zGnajz2hVIu0uRPP/dJvJesGRaXtimpA4lpxap7FaIJndG2UIoKhnBU4DxyDQIWv6yg=="],
 
-    "@seigiard/sync-engine": ["@seigiard/sync-engine@vendor/seigiard-sync-engine-0.5.0-59bdbe98.tgz", { "peerDependencies": { "effect": "4.0.1" } }, "sha512-XN5GY9M3ueBBeaWWRENPCLIwh3Dl0GGPwF06KfgGvpn+WJ/zU0PNXAtfI7PxPk2mpGXJocEw9zKyeMSPXEolRw=="],
+    "@seigiard/sync-engine": ["@seigiard/sync-engine@0.5.0", "", { "peerDependencies": { "effect": "4.0.1" } }, "sha512-XN5GY9M3ueBBeaWWRENPCLIwh3Dl0GGPwF06KfgGvpn+WJ/zU0PNXAtfI7PxPk2mpGXJocEw9zKyeMSPXEolRw=="],
 
     "@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
 
