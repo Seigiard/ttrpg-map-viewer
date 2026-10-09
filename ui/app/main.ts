@@ -327,6 +327,9 @@ async function toggle(path: CatalogPath): Promise<void> {
 
 /** Reveals a path in the tree, loading and opening every Category above it, and puts the cursor on it. */
 async function reveal(path: CatalogPath): Promise<void> {
+  // The root has no ancestors, yet its index holds the top rows of the tree.
+  await folder("");
+
   for (const ancestor of ancestorPaths(path)) {
     if (ancestor !== "") open.add(ancestor);
     await folder(ancestor);
