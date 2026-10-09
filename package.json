@@ -12,11 +12,12 @@
     "format:fix": "oxfmt --write .",
     "fix": "bun run format:fix && bun run lint:fix",
     "typecheck": "tsc --noEmit",
-    "test": "LOG_LEVEL=error bun test test/unit",
+    "test": "LOG_LEVEL=error bun test test/unit && if [ \"$(uname)\" = Linux ]; then LOG_LEVEL=error bun test test/engine; else echo 'Skipping test/engine on non-Linux; run bun run test:docker'; fi",
     "test:docker": "docker compose -f docker-compose.test.yml run --rm test",
     "build:ui": "bun ui/scripts/build-ui.ts"
   },
   "dependencies": {
+    "@seigiard/sync-engine": "0.5.5",
     "client-zip": "^2.5.1",
     "effect": "4.0.1",
     "sharp": "^0.35.5"

@@ -75,7 +75,7 @@ A derived image of a variant, reduced only as far as needed so a browser can sli
 _Avoid_: printable, export
 
 **Regeneration**:
-Bringing the part of the catalog that mirrors a changed part of the collection up to date.
+Bringing the part of the catalog that mirrors a changed part of the collection up to date. The shared engine owns when regeneration runs; TTRPG owns what the catalog means and writes.
 _Avoid_: rebuild, sync, reindex
 
 ### Actions

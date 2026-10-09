@@ -17,7 +17,7 @@ export function isVariantFile(file: string): boolean {
   return file !== "" && file !== "." && file !== ".." && !file.includes("/") && !file.includes("\\");
 }
 
-export function isInside(root: string, path: string): boolean {
+function isInside(root: string, path: string): boolean {
   const pathFromRoot = relative(root, path);
 
   return pathFromRoot === "" || (!pathFromRoot.startsWith(`..${sep}`) && pathFromRoot !== "..");

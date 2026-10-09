@@ -11,4 +11,4 @@ services:
       - ./tsconfig.json:/app/tsconfig.json:ro
     environment:
       - LOG_LEVEL=error
-    command: ["bun", "test", "test/unit"]
+    command: ["bun", "test", "test/unit", "test/engine"]

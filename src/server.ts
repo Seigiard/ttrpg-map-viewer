@@ -1,6 +1,4 @@
-import { Effect } from "effect";
-import { generateCatalog } from "./catalog/generate.ts";
-import { RegenerationController } from "./catalog/regeneration.ts";
+import { startEngineRuntime } from "./catalog/engine/runtime.ts";
 import { loadConfig } from "./config.ts";
 import { log } from "./logging/index.ts";
 import { mapZipResponse } from "./map-zip.ts";
@@ -8,21 +6,20 @@ import { printImageResponse } from "./print-image.ts";
 
 const config = loadConfig();
 
-async function regenerate(): Promise<void> {
-  const startedAt = performance.now();
-  log.info("Generate", "Generation started", { files: config.filesPath, data: config.dataPath });
-  const summary = await Effect.runPromise(generateCatalog(config));
-  log.info("Generate", "Generation finished", { ...summary, duration_ms: Math.round(performance.now() - startedAt) });
-}
-
-const regeneration = new RegenerationController({
-  debounceMs: config.regenerationDebounceMs,
+const synchronization = startEngineRuntime({
+  filesPath: config.filesPath,
+  dataPath: config.dataPath,
+  overridesPath: config.overridesPath,
+  thumbnailConcurrency: config.thumbnailConcurrency,
   reconcileIntervalMs: config.reconcileIntervalMs,
-  regenerate,
-  onError: (error) => log.error("Generate", "Generation failed", error),
 });
 
-// This endpoint is reached only by the local watcher, not through nginx.
+// A failed first pass without usable output leaves nothing the process can serve; exit so the container restarts.
+synchronization.ready.catch(() => process.exit(1));
+
+log.info("Server", "Synchronization started", { composition: "engine" });
+
+// These endpoints are reached only by the local watcher and operators, not through nginx.
 const server = Bun.serve({
   port: config.port,
   hostname: "127.0.0.1",
@@ -30,10 +27,14 @@ const server = Bun.serve({
     const url = new URL(req.url);
 
     if (url.pathname === "/internal/regenerate" && req.method === "POST") {
-      regeneration.trigger();
+      void synchronization
+        .requestPass(url.searchParams.get("force") === "1")
+        .catch((error: Error) => log.error("Generate", "Pass request failed", error));
 
       return new Response(null, { status: 202 });
     }
+
+    if (url.pathname === "/internal/status" && req.method === "GET") return Response.json(await synchronization.status());
 
     if (url.pathname === "/api/map-zip") return mapZipResponse(req, config);
 
@@ -47,19 +48,13 @@ const server = Bun.serve({
 
 log.info("Server", "Listening", { port: server.port });
 
-// Only a failed initial generation exits non-zero; later regeneration failures are logged by the controller.
-void regeneration.start().catch((error: Error) => {
-  log.error("Generate", "Generation failed", error);
-  process.exit(1);
-});
-
-function shutdown(): void {
+async function shutdown(): Promise<void> {
   log.info("Server", "Shutting down");
-  regeneration.stop();
   void server.stop();
+  await synchronization.stop();
   process.exit(0);
 }
 
-process.on("SIGTERM", shutdown);
+process.on("SIGTERM", () => void shutdown());
 
-process.on("SIGINT", shutdown);
+process.on("SIGINT", () => void shutdown());

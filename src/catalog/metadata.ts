@@ -9,7 +9,7 @@ import type { MapMetadata, MapSize, VariantMetadata } from "./model.ts";
 
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- Third-party JSON is validated at this parse boundary before it enters the catalog domain. */
 
-export interface ImageDimensions {
+interface ImageDimensions {
   readonly width: number;
   readonly height: number;
 }
@@ -311,25 +311,26 @@ function dungeondraftMetadata(map: MapNode, folder: FolderListing | undefined, f
   );
 }
 
-/** Applies independent metadata sources in ascending precedence: filename, Czepeku, then Dungeondraft. */
-export function enrichMapMetadata(
-  maps: readonly MapNode[],
-  listing: FolderListing,
-  filesPath: string,
-  dimensions: VariantDimensions,
-): Effect.Effect<readonly MapNode[], never> {
-  return Effect.gen(function* () {
-    const metadataListing = collectMetadataListing(listing, filesPath);
-    const czepeku = yield* readCzepekuMetadata(metadataListing.czepekuPath);
+/** Pass-level metadata inputs, read once so a per-map caller does not parse the Czepeku file for every map. */
+export interface MetadataSources {
+  readonly listing: MetadataListing;
+  readonly czepeku: readonly CzepekuEntry[];
+  readonly filesPath: string;
+}
 
-    return yield* Effect.forEach(maps, (map) =>
-      dungeondraftMetadata(
-        czepekuMetadata(filenameMetadata(map, dimensions), czepeku, metadataListing.czepekuDirectory ?? "\u0000"),
-        metadataListing.folders.get(map.sourcePath),
-        filesPath,
-      ),
-    );
-  });
+export function loadMetadataSources(listing: FolderListing, filesPath: string): Effect.Effect<MetadataSources, never> {
+  const metadataListing = collectMetadataListing(listing, filesPath);
+
+  return readCzepekuMetadata(metadataListing.czepekuPath).pipe(Effect.map((czepeku) => ({ listing: metadataListing, czepeku, filesPath })));
+}
+
+/** Applies independent metadata sources in ascending precedence: filename, Czepeku, then Dungeondraft. */
+export function enrichMap(map: MapNode, sources: MetadataSources, dimensions: VariantDimensions): Effect.Effect<MapNode, never> {
+  return dungeondraftMetadata(
+    czepekuMetadata(filenameMetadata(map, dimensions), sources.czepeku, sources.listing.czepekuDirectory ?? "\u0000"),
+    sources.listing.folders.get(map.sourcePath),
+    sources.filesPath,
+  );
 }
 
 /* oxlint-enable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion */

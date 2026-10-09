@@ -39,7 +39,7 @@ export interface VariantMetadata {
 export interface Cover {
   /** File name of the variant chosen as the cover. */
   readonly variant: string;
-  /** Output-tree-relative path of the cover's thumbnail; null when it could not be made. */
+  /** Output-tree-relative path of the cover's thumbnail; null when no thumbnail is published yet. */
   readonly thumbnail: CatalogPath | null;
 }
 
@@ -60,7 +60,7 @@ export interface SearchMap extends Pick<MapMetadata, "author" | "tags"> {
   readonly path: CatalogPath;
   /** Names of the Categories that contain the Map, ordered from the collection root. */
   readonly categoryPath: readonly string[];
-  /** Output-tree-relative path of the Cover Thumbnail; null when it could not be made. */
+  /** Output-tree-relative path of the Cover Thumbnail; null when no thumbnail is published yet. */
   readonly thumbnail: CatalogPath | null;
   readonly variantCount: number;
 }
@@ -79,9 +79,9 @@ export interface Variant extends VariantMetadata {
   readonly height?: number;
   /** Whether the original is a video loop instead of a still image. */
   readonly animated: boolean;
-  /** Output-tree-relative path of the variant's thumbnail; null when it could not be made. */
+  /** Output-tree-relative path of the variant's thumbnail; null when no thumbnail is published yet. */
   readonly thumbnail: CatalogPath | null;
-  /** Output-tree-relative path of the variant's preview; null when it could not be made. */
+  /** Output-tree-relative path of the variant's preview; null when no preview is published yet. */
   readonly preview: CatalogPath | null;
 }
 

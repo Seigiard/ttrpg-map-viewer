@@ -4,6 +4,8 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/p
 import { dirname } from "node:path";
 import { ownedPromise } from "../utils/owned-promise.ts";
 
+let temporaryFileCounter = 0;
+
 interface FailureProps {
   readonly operation: string;
   readonly path: string;
@@ -11,9 +13,9 @@ interface FailureProps {
   readonly message: string;
 }
 
-export class FileSystemNotFound extends Data.TaggedError("FileSystemNotFound")<FailureProps> {}
+class FileSystemNotFound extends Data.TaggedError("FileSystemNotFound")<FailureProps> {}
 
-export class FileSystemFailure extends Data.TaggedError("FileSystemFailure")<FailureProps> {}
+class FileSystemFailure extends Data.TaggedError("FileSystemFailure")<FailureProps> {}
 
 export type FileSystemError = FileSystemNotFound | FileSystemFailure;
 
@@ -27,7 +29,8 @@ function fsEffect<A>(operation: string, path: string, run: () => Promise<A>): Ef
     const code = errnoCode(cause);
     const props = { operation, path, cause, message: `${operation} ${path} failed: ${code ?? String(cause)}` };
 
-    return code === "ENOENT" ? new FileSystemNotFound(props) : new FileSystemFailure(props);
+    // A path below a regular file is as absent as a missing one.
+    return code === "ENOENT" || code === "ENOTDIR" ? new FileSystemNotFound(props) : new FileSystemFailure(props);
   });
 }
 
@@ -61,7 +64,7 @@ export function ensureParentDirectory(path: string): Effect.Effect<void, FileSys
 
 /** Writes through a temp file and rename, so nginx never serves a half-written file. */
 export function writeFileAtomically(path: string, content: string): Effect.Effect<void, FileSystemError> {
-  const temporary = `${path}.tmp`;
+  const temporary = `${path}.${process.pid}.${temporaryFileCounter++}.tmp`;
 
   return ensureParentDirectory(path).pipe(
     Effect.andThen(() =>

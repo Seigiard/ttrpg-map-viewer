@@ -22,8 +22,10 @@ export class DerivedImageFailure extends Data.TaggedError("DerivedImageFailure")
 
 export type DerivedImageOutcome = "created" | "fresh";
 
+const DERIVED_IMAGE_PROCESSING_VERSION = "1";
+
 export function sourceSignature(mtimeMs: number, size: number): string {
-  return JSON.stringify({ mtimeMs, size });
+  return JSON.stringify({ mtimeMs, size, version: DERIVED_IMAGE_PROCESSING_VERSION });
 }
 
 function sourceSignaturePath(destination: string): string {
@@ -36,12 +38,16 @@ function renderStillImage(original: string, destination: string, maxSize: number
   return ownedPromise(
     async () => {
       // limitInputPixels: false — collection originals reach 16000×22000, above sharp's default pixel cap.
-      await sharp(original, { limitInputPixels: false })
-        .resize(maxSize, maxSize, { fit: "inside", withoutEnlargement: true })
-        .toColorspace("srgb")
-        .webp({ quality: 80 })
-        .toFile(temporary);
-      await rename(temporary, destination);
+      try {
+        await sharp(original, { limitInputPixels: false })
+          .resize(maxSize, maxSize, { fit: "inside", withoutEnlargement: true })
+          .toColorspace("srgb")
+          .webp({ quality: 80 })
+          .toFile(temporary);
+        await rename(temporary, destination);
+      } finally {
+        await rm(temporary, { force: true });
+      }
     },
     (cause) => new DerivedImageFailure({ original, cause, message: `derived image of ${original} failed: ${String(cause)}` }),
   );
@@ -52,7 +58,7 @@ function renderVideoFrame(original: string, destination: string, maxSize: number
   const frame = `${destination}.frame.png`;
 
   return ownedPromise(
-    () =>
+    (signal) =>
       new Promise<void>((resolve, reject) => {
         const process = spawn("ffmpeg", [
           "-hide_banner",
@@ -71,22 +77,40 @@ function renderVideoFrame(original: string, destination: string, maxSize: number
         ]);
 
         let stderr = "";
+        let interrupted = false;
+
+        const interrupt = () => {
+          interrupted = true;
+          process.kill("SIGTERM");
+          setTimeout(() => {
+            if (process.exitCode === null) process.kill("SIGKILL");
+          }, 1_000).unref();
+        };
+
+        if (signal.aborted) interrupt();
+        else signal.addEventListener("abort", interrupt, { once: true });
 
         process.stderr.on("data", (chunk: Buffer) => {
           stderr += chunk.toString();
         });
 
         process.once("error", reject);
-        process.once("close", (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg exited with ${code}: ${stderr}`))));
+        process.once("close", (code, signalName) => {
+          signal.removeEventListener("abort", interrupt);
+
+          if (interrupted) reject(new Error(`ffmpeg interrupted by ${signalName ?? "shutdown"}`));
+          else if (code === 0) resolve();
+          else reject(new Error(`ffmpeg exited with ${code}: ${stderr}`));
+        });
       })
         .then(() => sharp(frame, { limitInputPixels: false }).toColorspace("srgb").webp({ quality: 80 }).toFile(temporary))
         .then(() => rename(temporary, destination))
-        .finally(() => rm(frame, { force: true })),
+        .finally(() => Promise.all([rm(frame, { force: true }), rm(temporary, { force: true })]).then(() => undefined)),
     (cause) => new DerivedImageFailure({ original, cause, message: `video frame of ${original} failed: ${String(cause)}` }),
   );
 }
 
-/** Makes a derived WebP unless its stored Original signature matches the current Original. */
+/** Makes a derived WebP unless force is false and its stored Original signature matches the current Original. */
 export function ensureDerivedImage(
   original: string,
   originalMtimeMs: number,
@@ -94,6 +118,7 @@ export function ensureDerivedImage(
   destination: string,
   maxSize: number,
   animated: boolean,
+  force = false,
 ): Effect.Effect<DerivedImageOutcome, DerivedImageFailure | FileSystemError> {
   return Effect.gen(function* () {
     const signature = sourceSignature(originalMtimeMs, originalSize);
@@ -104,7 +129,7 @@ export function ensureDerivedImage(
 
     const existingMtime = yield* mtimeOrNull(destination);
 
-    if (existingMtime !== null && existingSignature === signature) return "fresh";
+    if (!force && existingMtime !== null && existingSignature === signature) return "fresh";
 
     yield* ensureParentDirectory(destination);
     yield* animated ? renderVideoFrame(original, destination, maxSize) : renderStillImage(original, destination, maxSize);

@@ -1,7 +1,7 @@
 import { readdirSync } from "node:fs";
 import { authorsIn, isVariantFile, normalise, stripExtensions } from "./normalise.ts";
 
-export const ARROW = " -> ";
+const ARROW = " -> ";
 
 /**
  * `normalised` groups Grid/HD/Day/Night variants of one map (DnDavid-style dumps).
