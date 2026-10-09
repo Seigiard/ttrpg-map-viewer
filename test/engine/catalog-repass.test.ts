@@ -913,7 +913,9 @@ describe("failures", () => {
       // #then
       expect(failed.available).toBe(true);
       expect(failed.availableFrom).toBe("prior-output");
+      expect(failed.verifying).toBe(false);
       expect(failed.completed).toBe(false);
+      expect(failed.followUp).toBeNull();
       expect(failed.errors.map((error) => error.source)).toContain("pass");
       expect(failed.errors.map((error) => error.message).join("\n")).toContain(workspace.collection);
       expect(await searchPaths()).toContain(PIT);
