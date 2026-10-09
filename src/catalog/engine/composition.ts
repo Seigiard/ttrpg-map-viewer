@@ -15,6 +15,7 @@ import { listingFromEntries } from "./listing.ts";
 import { catalogStatePath, includeObservableCollectionSource, type SourcePolicyFileSystem } from "./policy.ts";
 import {
   CategoryWork,
+  ClearWorkFailure,
   FinalizeIndexesWork,
   ImageWork,
   imageWorkKey,
@@ -22,6 +23,7 @@ import {
   SearchWork,
   type CatalogWork,
   workKey,
+  workFailureKey,
   type PassContext,
 } from "./work.ts";
 
@@ -95,6 +97,7 @@ function catalogLiveOptions(
   options: CatalogSynchronizationOptions,
 ): LiveOptions<CatalogWork, FileSystemError | DerivedImageFailure, never> {
   const imageFailures = options.imageFailures ?? createImageFailureRegistry();
+  let previousFailureKeys = new Set<string>();
 
   return {
     sourcePath: options.filesPath,
@@ -105,7 +108,7 @@ function catalogLiveOptions(
     handle: handleCatalogWork,
     concurrency: options.thumbnailConcurrency,
     key: workKey,
-    failureKey: workKey,
+    failureKey: workFailureKey,
     freshness: {
       describe: (work) => {
         if (!(work instanceof ImageWork)) return undefined;
@@ -175,21 +178,29 @@ function catalogLiveOptions(
 
         imageFailures.retain(declaredImageKeys);
 
+        const work =
+          passMaps.length === 0
+            ? [...categories.map((category) => new CategoryWork({ category, pass })), new SearchWork({ pass })]
+            : [
+                ...passMaps.map((map) => new MapWork({ map, pass })),
+                new FinalizeIndexesWork({ pass }),
+                ...passMaps.map((map) => new ImageWork({ map, variant: map.cover, pass })),
+                ...passMaps.flatMap((map) =>
+                  orderedVariants(map).flatMap((variant) => (variant === map.cover ? [] : [new ImageWork({ map, variant, pass })])),
+                ),
+              ];
+
+        const declaredFailureKeys = new Set([...work.map(workFailureKey), workFailureKey(new CategoryWork({ category: root, pass }))]);
+
+        const staleFailures = [...previousFailureKeys].flatMap((failureKey) =>
+          declaredFailureKeys.has(failureKey) ? [] : [new ClearWorkFailure({ failureKey })],
+        );
+
+        previousFailureKeys = declaredFailureKeys;
+
         return {
           minimum: [new CategoryWork({ category: root, pass })],
-          work:
-            passMaps.length === 0
-              ? [...categories.map((category) => new CategoryWork({ category, pass })), new SearchWork({ pass })]
-              : [
-                  ...passMaps.map((map) => new MapWork({ map, pass })),
-                  new FinalizeIndexesWork({ pass }),
-                  ...passMaps.map((map) => new ImageWork({ map, variant: map.cover, pass })),
-                  ...passMaps.flatMap((map) =>
-                    orderedVariants(map)
-                      .filter((variant) => variant !== map.cover)
-                      .map((variant) => new ImageWork({ map, variant, pass })),
-                  ),
-                ],
+          work: [...staleFailures, ...work],
           publish: expectedOutputManifest(categories, maps, options.dataPath, options.overridesPath).pipe(
             Effect.andThen((manifest) => pruneOrphans(options.dataPath, manifest, startedAt)),
             Effect.tap(() =>

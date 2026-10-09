@@ -6,7 +6,7 @@ import { workKey } from "./work.ts";
 
 const REPORT_INTERVAL_MS = 5_000;
 
-const firstLine = (cause: Cause.Cause<unknown>) => Cause.pretty(cause).split("\n")[0] ?? "";
+const describeCause = (cause: Cause.Cause<unknown>) => Cause.pretty(cause).trim();
 
 export interface EngineRuntime {
   /** Resolves when startup establishes usable output; rejects only when no output can be served. */
@@ -51,7 +51,7 @@ export function startEngineRuntime(options: CatalogSynchronizationOptions): Engi
       const status = yield* live.status;
 
       const workErrors = [
-        ...status.work.errors.map((error) => ({ work: workKey(error.work), message: firstLine(error.cause) })),
+        ...status.work.errors.map((error) => ({ work: workKey(error.work), message: describeCause(error.cause) })),
         ...imageFailures.snapshot(),
       ];
 
@@ -69,12 +69,12 @@ export function startEngineRuntime(options: CatalogSynchronizationOptions): Engi
           (workState === "complete" || workState === "complete-with-errors"),
         errors: [
           ...workErrors.map((error) => ({ source: "work" as const, message: `${error.work}: ${error.message}` })),
-          ...(status.failure ? [{ source: "pass" as const, message: firstLine(status.failure) }] : []),
+          ...(status.failure ? [{ source: "pass" as const, message: describeCause(status.failure) }] : []),
         ],
         state: status.state,
         pass: status.pass?.kind ?? null,
         followUp: status.followUp?.kind ?? null,
-        failure: status.failure ? firstLine(status.failure) : null,
+        failure: status.failure ? describeCause(status.failure) : null,
         work: {
           state: workState,
           pending: status.work.pending,

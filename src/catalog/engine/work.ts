@@ -39,7 +39,11 @@ export class ImageWork extends Data.TaggedClass("ImageWork")<{
   readonly pass: PassContext;
 }> {}
 
-export type CatalogWork = MapWork | CategoryWork | SearchWork | FinalizeIndexesWork | ImageWork;
+export class ClearWorkFailure extends Data.TaggedClass("ClearWorkFailure")<{
+  readonly failureKey: string;
+}> {}
+
+export type CatalogWork = MapWork | CategoryWork | SearchWork | FinalizeIndexesWork | ImageWork | ClearWorkFailure;
 
 export function imageWorkKey(mapPath: CatalogPath, variantName: string, kind: DerivedImageKind): string {
   return JSON.stringify(["image", mapPath, variantName, kind]);
@@ -54,6 +58,20 @@ export function workKey(work: CatalogWork): string {
       SearchWork: () => "search",
       FinalizeIndexesWork: () => "finalize-indexes",
       ImageWork: ({ map, variant }) => imageWorkKey(map.path, variant.name, "preview"),
+      ClearWorkFailure: ({ failureKey }) => `clear-failure:${failureKey}`,
+    }),
+  );
+}
+
+export function workFailureKey(work: CatalogWork): string {
+  return Match.value(work).pipe(
+    Match.tagsExhaustive({
+      MapWork: ({ map }) => `map:${map.path}`,
+      CategoryWork: ({ category }) => `category:${category.path}`,
+      SearchWork: () => "search",
+      FinalizeIndexesWork: () => "finalize-indexes",
+      ImageWork: ({ map, variant }) => imageWorkKey(map.path, variant.name, "preview"),
+      ClearWorkFailure: ({ failureKey }) => failureKey,
     }),
   );
 }

@@ -9,6 +9,7 @@ import { openCatalogSynchronization, startCatalogSynchronization } from "../../s
 import { includeObservableCollectionSource } from "../../src/catalog/engine/policy.ts";
 import { startEngineRuntime } from "../../src/catalog/engine/runtime.ts";
 import type { CategoryIndex, MapIndex, SearchIndex } from "../../src/catalog/model.ts";
+import { printImageResponse } from "../../src/print-image.ts";
 import { ownedPromise } from "../../src/utils/owned-promise.ts";
 import { createWorkspace, image, LAKESIDE, PIT, type Workspace } from "./collection-fixture.ts";
 import { passOf, sessionOptions, withSession } from "./session.ts";
@@ -180,6 +181,19 @@ describe("source policy decision table", () => {
     const included = includeObservableCollectionSource("/collection", "Missing", {
       lstatSync: () => {
         throw errorWithCode("ENOENT", "not found");
+      },
+      readdirSync: () => undefined,
+    });
+
+    // #then
+    expect(included).toBe(false);
+  });
+
+  test("a confirmed ENOTDIR entry is excluded", () => {
+    // #when
+    const included = includeObservableCollectionSource("/collection", "Map/Room.jpg", {
+      lstatSync: () => {
+        throw errorWithCode("ENOTDIR", "not a directory");
       },
       readdirSync: () => undefined,
     });
@@ -604,6 +618,49 @@ describe("a later pass in the same engine session", () => {
     expect(await exists(join(workspace.output, PIT))).toBe(false);
     expect(await exists(join(workspace.output, ".sync-engine"))).toBe(true);
   });
+
+  test("Dungeondraft export metadata is published on matching variants", async () => {
+    // #given
+    await image(join(workspace.collection, "Dungeondraft", "Crypt", "Crypt Day.png"), 120, 80, "png");
+    await writeFile(
+      join(workspace.collection, "Dungeondraft", "Crypt", "Crypt.dd2vtt"),
+      JSON.stringify({ resolution: { map_size: { x: 24, y: 16 }, pixels_per_grid: 5 } }),
+    );
+
+    // #when
+    await withSession(workspace, async () => undefined);
+
+    // #then
+    expect((await readJson<MapIndex>(join(workspace.output, "Dungeondraft", "Crypt", "index.json"))).variants[0]).toEqual(
+      expect.objectContaining({ file: "Crypt Day.png", mapSize: { width: 24, height: 16 }, gridScale: 5 }),
+    );
+  });
+
+  test("Print cache survives while its variant is declared and is pruned after deletion", async () => {
+    // #given
+    await withSession(workspace, async (session) => {
+      const request = new Request(
+        `http://catalog/api/print-image?path=${encodeURIComponent(PIT)}&variant=${encodeURIComponent("Original Night.jpg")}`,
+      );
+
+      const response = await printImageResponse(request, { filesPath: workspace.collection, dataPath: workspace.output });
+      const printPath = join(workspace.output, PIT, "_print", "Original Night.jpg.jpg");
+      expect([response.status, await exists(printPath)]).toEqual([302, true]);
+
+      // #when
+      await passOf(session);
+
+      // #then
+      expect(await exists(printPath)).toBe(true);
+
+      // #when
+      await rm(join(workspace.collection, PIT, "Original Night.jpg"));
+      await passOf(session);
+
+      // #then
+      expect(await exists(printPath)).toBe(false);
+    });
+  });
 });
 
 describe("failures", () => {
@@ -637,6 +694,26 @@ describe("failures", () => {
       // #then
       expect((await Effect.runPromise(session.status)).work.errors).toEqual([]);
       expect(await searchPaths()).toContain("Pack 09/New Keep");
+    });
+  });
+
+  test("a retained map-write failure clears when the map is no longer declared", async () => {
+    // #given
+    await withSession(workspace, async (session) => {
+      await writeFile(join(workspace.output, "Pack 09", "Deleted Keep"), "stale file in the way");
+      await image(join(workspace.collection, "Pack 09", "Deleted Keep", "Keep Day.png"), 40, 40, "png");
+      await passOf(session);
+      expect(
+        (await Effect.runPromise(session.status)).work.errors.map(({ work }) => (work._tag === "MapWork" ? work.map.path : work._tag)),
+      ).toEqual(["Pack 09/Deleted Keep"]);
+
+      // #when
+      await rm(join(workspace.collection, "Pack 09", "Deleted Keep"), { recursive: true, force: true });
+      await passOf(session);
+
+      // #then
+      expect((await Effect.runPromise(session.status)).work.errors).toEqual([]);
+      expect(await searchPaths()).not.toContain("Pack 09/Deleted Keep");
     });
   });
 
@@ -851,6 +928,41 @@ describe("failures", () => {
       expect(await exists(join(workspace.output, "Mixed", "Inner", "index.json"))).toBe(false);
       expect(await searchPaths()).not.toContain("Mixed/Inner");
     } finally {
+      await runtime.stop();
+    }
+  });
+
+  test("a confirmed-absent ENOTDIR entry reaches the source policy and allows pruning", async () => {
+    // #given
+    await withSession(workspace, async () => undefined);
+    let reportInner = true;
+    const absentPath = join(workspace.collection, "Mixed", "Inner");
+
+    const runtime = startEngineRuntime({
+      ...sessionOptions(workspace),
+      sourcePolicyFileSystem: {
+        lstatSync: (path) => {
+          if (reportInner && path === absentPath) throw errorWithCode("ENOTDIR", "parent became a file");
+
+          return lstatSync(path);
+        },
+        readdirSync,
+      },
+    });
+
+    try {
+      await runtime.ready;
+
+      // #when
+      await rm(absentPath, { recursive: true, force: true });
+      await runtime.requestPass();
+      await waitForRuntimeRecovery(runtime, "ENOTDIR confirmed absence prune");
+
+      // #then
+      expect(await exists(join(workspace.output, "Mixed", "Inner", "index.json"))).toBe(false);
+      expect(await searchPaths()).not.toContain("Mixed/Inner");
+    } finally {
+      reportInner = false;
       await runtime.stop();
     }
   });

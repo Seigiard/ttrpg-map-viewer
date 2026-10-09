@@ -268,6 +268,7 @@ export function handleCatalogWork(work: CatalogWork): Effect.Effect<readonly Cat
       SearchWork: ({ pass }) => refreshSearch(pass),
       FinalizeIndexesWork: handleFinalizeIndexes,
       ImageWork: handleImage,
+      ClearWorkFailure: () => Effect.succeed([]),
     }),
   );
 }
