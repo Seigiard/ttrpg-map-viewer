@@ -2,7 +2,6 @@ import { Cause, Effect, Fiber, Schedule } from "effect";
 import { log } from "../../logging/index.ts";
 import { type CatalogSynchronizationOptions, startCatalogSynchronization } from "./composition.ts";
 import { createImageFailureRegistry } from "./image-status.ts";
-import { createSourceFailureRegistry } from "./source-status.ts";
 import { workKey } from "./work.ts";
 
 const REPORT_INTERVAL_MS = 5_000;
@@ -42,7 +41,6 @@ interface EngineStatus {
 export function startEngineRuntime(options: CatalogSynchronizationOptions): EngineRuntime {
   const controller = new AbortController();
   const imageFailures = createImageFailureRegistry();
-  const sourceFailures = createSourceFailureRegistry();
   const session = Promise.withResolvers<Effect.Success<ReturnType<typeof startCatalogSynchronization>>>();
   const ready = Promise.withResolvers<void>();
   session.promise.catch(() => undefined);
@@ -55,7 +53,6 @@ export function startEngineRuntime(options: CatalogSynchronizationOptions): Engi
       const workErrors = [
         ...status.work.errors.map((error) => ({ work: workKey(error.work), message: firstLine(error.cause) })),
         ...imageFailures.snapshot(),
-        ...sourceFailures.snapshot().map((failure) => ({ work: `source:${failure.path}`, message: failure.message })),
       ];
 
       const workState = status.work.state === "complete" && workErrors.length > 0 ? "complete-with-errors" : status.work.state;
@@ -86,7 +83,7 @@ export function startEngineRuntime(options: CatalogSynchronizationOptions): Engi
       } satisfies EngineStatus;
     });
 
-  // Reports each distinct failure once; it observes the session and schedules nothing.
+  // Logs when the failure snapshot changes; it observes the session and schedules nothing.
   const report = (live: Effect.Success<ReturnType<typeof startCatalogSynchronization>>) => {
     let reported = "";
 
@@ -110,7 +107,7 @@ export function startEngineRuntime(options: CatalogSynchronizationOptions): Engi
   const running = Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const live = yield* startCatalogSynchronization({ ...options, imageFailures, sourceFailures });
+        const live = yield* startCatalogSynchronization({ ...options, imageFailures });
         session.resolve(live);
         const reporter = yield* Effect.forkScoped(report(live));
 

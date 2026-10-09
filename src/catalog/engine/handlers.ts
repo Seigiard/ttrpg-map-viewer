@@ -1,24 +1,9 @@
 import { Effect, Match, Semaphore } from "effect";
 import { join } from "node:path";
 import { compareNames, isAnimatedVariant, type CategoryNode, type FileListing, type MapNode } from "../classify.ts";
-import {
-  mtimeOrNull,
-  readDirectory,
-  readTextFile,
-  removePath,
-  statPath,
-  type FileSystemError,
-  writeTextFileIfChanged,
-} from "../file-system.ts";
-import {
-  categoryIndexFromPublished,
-  mapCardFromIndex,
-  mapIndex,
-  previewPath,
-  searchIndexFromPublished,
-  thumbnailPath,
-} from "../folder-index.ts";
-import { type CatalogPath, type CategoryIndex, INDEX_FILE, LOOSE_MAP_SEGMENT, type MapCard, type MapIndex, SEARCH_FILE } from "../model.ts";
+import { mtimeOrNull, readTextFile, removePath, statPath, type FileSystemError, writeTextFileIfChanged } from "../file-system.ts";
+import { categoryIndexFromPublished, mapIndex, previewPath, searchIndexFromPublished, thumbnailPath } from "../folder-index.ts";
+import { type CatalogPath, INDEX_FILE, LOOSE_MAP_SEGMENT, type MapCard, type MapIndex, SEARCH_FILE } from "../model.ts";
 import { ensureDerivedImage, PREVIEW_MAX_SIZE, THUMBNAIL_MAX_SIZE, type DerivedImageFailure, type DerivedImageKind } from "../thumbnail.ts";
 import { type CatalogWork, FinalizeIndexesWork, ImageWork, imageWorkKey, MapWork, type PassContext } from "./work.ts";
 import { parentOf } from "./listing.ts";
@@ -126,11 +111,7 @@ function handleFinalizeIndexes({ pass }: FinalizeIndexesWork): Effect.Effect<rea
     return Effect.sleep(10).pipe(Effect.andThen(Effect.suspend(() => handleFinalizeIndexes(new FinalizeIndexesWork({ pass })))));
 
   return Effect.gen(function* () {
-    yield* Effect.forEach(
-      pass.categories.values(),
-      (category) => (pass.skippedDirectories.has(category.path) ? Effect.void : refreshCategory(category, pass)),
-      { discard: true },
-    );
+    yield* Effect.forEach(pass.categories.values(), (category) => refreshCategory(category, pass), { discard: true });
     yield* refreshSearch(pass);
 
     return [];
@@ -220,7 +201,7 @@ function handleImage({ map, variant, pass }: ImageWork): Effect.Effect<readonly 
     if (variant === map.cover) {
       const parent = pass.categories.get(parentOf(map.path));
 
-      if (parent && !pass.skippedDirectories.has(parent.path)) yield* refreshCategory(parent, pass);
+      if (parent) yield* refreshCategory(parent, pass);
       yield* refreshSearch(pass);
     }
 
@@ -239,17 +220,6 @@ function parsePublishedMap(content: string): MapIndex | null {
   }
 }
 
-function parsePublishedCategory(content: string): CategoryIndex | null {
-  try {
-    // SAFETY: the file was written against the CategoryIndex contract; the kind check rejects anything else.
-    const index = JSON.parse(content) as CategoryIndex;
-
-    return index.kind === "category" ? index : null;
-  } catch {
-    return null;
-  }
-}
-
 function readPublishedMap(dataPath: string, path: CatalogPath): Effect.Effect<MapIndex | null, FileSystemError> {
   return readTextFile(join(dataPath, path, INDEX_FILE)).pipe(
     Effect.map(parsePublishedMap),
@@ -257,65 +227,20 @@ function readPublishedMap(dataPath: string, path: CatalogPath): Effect.Effect<Ma
   );
 }
 
-function readPublishedCategory(dataPath: string, path: CatalogPath): Effect.Effect<CategoryIndex | null, FileSystemError> {
-  return readTextFile(join(dataPath, path, INDEX_FILE)).pipe(
-    Effect.map(parsePublishedCategory),
-    Effect.catchTag("FileSystemNotFound", () => Effect.succeed(null)),
-  );
-}
-
-function collectPublishedMaps(dataPath: string, path: CatalogPath): Effect.Effect<readonly MapIndex[], FileSystemError> {
-  return Effect.gen(function* () {
-    const self = yield* readPublishedMap(dataPath, path);
-
-    if (self) return [self];
-
-    const entries = yield* readDirectory(join(dataPath, path)).pipe(Effect.catchTag("FileSystemNotFound", () => Effect.succeed([])));
-
-    const nested = yield* Effect.forEach(
-      entries.filter((entry) => entry.isDirectory()),
-      (entry) => collectPublishedMaps(dataPath, path === "" ? entry.name : `${path}/${entry.name}`),
-      { concurrency: 16 },
-    );
-
-    return nested.flat();
-  });
-}
-
-function preservedPublishedMaps(pass: PassContext): Effect.Effect<readonly MapIndex[], FileSystemError> {
-  return Effect.forEach(pass.preservedPrefixes, (path) => collectPublishedMaps(pass.dataPath, path), { concurrency: 16 }).pipe(
-    Effect.map((indexes) => indexes.flat()),
-  );
-}
-
 function handleCategory(category: CategoryNode, pass: PassContext): Effect.Effect<readonly CatalogWork[], FileSystemError> {
   return Effect.gen(function* () {
     const published = yield* Effect.forEach(category.maps, (map) => readPublishedMap(pass.dataPath, map.path));
-    const preserved = (yield* preservedPublishedMaps(pass)).filter((index) => parentOf(index.path) === category.path);
 
     const byPath = new Map(published.flatMap((index) => (index ? [[index.path, index] as const] : [])));
 
     const index = categoryIndexFromPublished(category, byPath);
 
-    const preservedCategories = yield* Effect.forEach(pass.skippedDirectories, (path) => readPublishedCategory(pass.dataPath, path), {
-      concurrency: 16,
-    });
-
-    const extraCategories = preservedCategories.flatMap((index) =>
-      index && parentOf(index.path) === category.path ? [{ name: index.name, path: index.path }] : [],
-    );
-
-    const extraMaps = preserved.filter((map) => !index.maps.some((card) => card.path === map.path)).map(mapCardFromIndex);
-
     yield* writeTextFileIfChanged(
       join(pass.dataPath, category.path, INDEX_FILE),
       JSON.stringify({
         ...index,
-        categories: [
-          ...index.categories,
-          ...extraCategories.filter((extra) => !index.categories.some((card) => card.path === extra.path)),
-        ].sort(compareCards),
-        maps: sortMapCards([...index.maps, ...extraMaps]),
+        categories: [...index.categories].sort(compareCards),
+        maps: sortMapCards(index.maps),
       }),
     );
 
@@ -326,9 +251,8 @@ function handleCategory(category: CategoryNode, pass: PassContext): Effect.Effec
 function handleSearch(pass: PassContext): Effect.Effect<readonly CatalogWork[], FileSystemError> {
   return Effect.gen(function* () {
     const published = yield* Effect.forEach(pass.maps, (map) => readPublishedMap(pass.dataPath, map.path), { concurrency: 16 });
-    const preserved = yield* preservedPublishedMaps(pass);
 
-    const byPath = new Map([...published.flatMap((index) => (index ? [index] : [])), ...preserved].map((index) => [index.path, index]));
+    const byPath = new Map(published.flatMap((index) => (index ? [[index.path, index] as const] : [])));
 
     yield* writeTextFileIfChanged(join(pass.dataPath, SEARCH_FILE), JSON.stringify(searchIndexFromPublished([...byPath.values()])));
 
@@ -340,8 +264,7 @@ export function handleCatalogWork(work: CatalogWork): Effect.Effect<readonly Cat
   return Match.value(work).pipe(
     Match.tagsExhaustive({
       MapWork: handleMap,
-      CategoryWork: ({ category, pass }) =>
-        pass.skippedDirectories.has(category.path) ? Effect.succeed([]) : refreshCategory(category, pass),
+      CategoryWork: ({ category, pass }) => refreshCategory(category, pass),
       SearchWork: ({ pass }) => refreshSearch(pass),
       FinalizeIndexesWork: handleFinalizeIndexes,
       ImageWork: handleImage,

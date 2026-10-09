@@ -18,4 +18,4 @@ CI publishes `ghcr.io/seigiard/ttrpg-map-viewer` on every push to `main` (`lates
 
 ## Synchronization
 
-Startup, watcher-triggered regeneration, forced resync, reconciliation and shutdown run through `@seigiard/sync-engine`. The root `index.json` is the minimum availability marker. `GET /internal/status` is local-only and reports availability, verification, completion and retained pass/work errors for operators.
+Startup, watcher-triggered regeneration, forced resync, reconciliation and shutdown run through `@seigiard/sync-engine`. The root `index.json` is the minimum availability marker. `GET /internal/status` is local-only and reports availability, verification, completion and retained pass/work errors for operators. If a source entry cannot be observed for a reason other than confirmed absence (`ENOENT` or `ENOTDIR`), the pass fails before declaration and leaves prior catalog output untouched until the source is readable again.

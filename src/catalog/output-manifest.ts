@@ -21,7 +21,6 @@ export function expectedOutputManifest(
   maps: readonly MapNode[],
   dataPath: string,
   overridesPath: string,
-  preservePrefixes: readonly string[] = [],
 ): Effect.Effect<OutputManifest, FileSystemError> {
   const paths = new Set([
     SEARCH_FILE,
@@ -64,25 +63,12 @@ export function expectedOutputManifest(
     },
     { concurrency: CONCURRENCY },
   ).pipe(
-    Effect.flatMap((printPaths) =>
-      Effect.forEach(preservePrefixes, (prefix) => collectExistingOutput(dataPath, prefix), { concurrency: CONCURRENCY }).pipe(
-        Effect.map((preserved) => ({ printPaths, preserved })),
-      ),
-    ),
-    Effect.map(({ printPaths, preserved }) => {
+    Effect.map((printPaths) => {
       for (const path of printPaths.flat()) paths.add(path);
-
-      for (const entry of preserved) {
-        for (const path of entry.paths) paths.add(path);
-      }
 
       const directories = new Set<string>();
 
       for (const map of maps) directories.add(join(map.path, "_print"));
-
-      for (const entry of preserved) {
-        for (const path of entry.directories) directories.add(path);
-      }
 
       for (const path of paths) {
         for (let slash = path.indexOf("/"); slash !== -1; slash = path.indexOf("/", slash + 1)) {
@@ -92,43 +78,6 @@ export function expectedOutputManifest(
 
       return { paths, directories };
     }),
-  );
-}
-
-function collectExistingOutput(dataPath: string, relativePath: string): Effect.Effect<OutputManifest, FileSystemError> {
-  const paths = new Set<string>();
-  const directories = new Set<string>();
-
-  return visitExistingOutput(dataPath, relativePath, paths, directories).pipe(Effect.as({ paths, directories }));
-}
-
-function visitExistingOutput(
-  dataPath: string,
-  relativePath: string,
-  paths: Set<string>,
-  directories: Set<string>,
-): Effect.Effect<void, FileSystemError> {
-  return readDirectory(join(dataPath, relativePath)).pipe(
-    Effect.flatMap((entries) => {
-      directories.add(relativePath);
-
-      return Effect.forEach(
-        entries,
-        (entry) => {
-          const childPath = `${relativePath}/${entry.name}`;
-
-          if (!entry.isDirectory()) {
-            paths.add(childPath);
-
-            return Effect.void;
-          }
-
-          return visitExistingOutput(dataPath, childPath, paths, directories);
-        },
-        { concurrency: CONCURRENCY, discard: true },
-      );
-    }),
-    Effect.catchTag("FileSystemNotFound", () => Effect.void),
   );
 }
 

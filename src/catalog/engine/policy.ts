@@ -2,13 +2,6 @@ import { lstatSync, readdirSync, type Stats } from "node:fs";
 import { join } from "node:path";
 import { ENGINE_STATE_DIRECTORY } from "../output-manifest.ts";
 
-type UnobservableSourceKind = "directory" | "file";
-
-export interface UnobservableSource {
-  readonly kind: UnobservableSourceKind;
-  readonly message: string;
-}
-
 export interface SourcePolicyFileSystem {
   readonly lstatSync: (path: string) => Stats;
   readonly readdirSync: (path: string) => void;
@@ -24,20 +17,14 @@ function includeCollectionSource(path: string): boolean {
 export function includeObservableCollectionSource(
   sourcePath: string,
   path: string,
-  onUnobservable?: (path: string, source: UnobservableSource) => void,
   fileSystem: SourcePolicyFileSystem = nodeSourcePolicyFileSystem,
 ): boolean {
   if (!includeCollectionSource(path)) return false;
 
-  return classifySourceObservation(sourcePath, path, onUnobservable, fileSystem);
+  return classifySourceObservation(sourcePath, path, fileSystem);
 }
 
-function classifySourceObservation(
-  sourcePath: string,
-  path: string,
-  onUnobservable: ((path: string, source: UnobservableSource) => void) | undefined,
-  fileSystem: SourcePolicyFileSystem,
-): boolean {
+function classifySourceObservation(sourcePath: string, path: string, fileSystem: SourcePolicyFileSystem): boolean {
   const absolute = join(sourcePath, path);
 
   try {
@@ -50,37 +37,13 @@ function classifySourceObservation(
     // SAFETY: Node fs throws Error-like values here; tests inject the same shape plus optional `code`.
     const observedError = error as NodeJS.ErrnoException;
 
-    try {
-      const info = fileSystem.lstatSync(absolute);
+    if (isConfirmedAbsent(observedError)) return false;
 
-      if (info.isDirectory()) onUnobservable?.(path, { kind: "directory", message: observedError.message });
-
-      return !info.isDirectory();
-    } catch (retryError) {
-      // SAFETY: Node fs throws Error-like values here; tests inject the same shape plus optional `code`.
-      const observedRetryError = retryError as NodeJS.ErrnoException;
-
-      if (isAbsent(observedRetryError)) return false;
-
-      onUnobservable?.(path, { kind: unobservableKindForFailedRetry(path), message: observedRetryError.message });
-
-      return false;
-    }
+    throw new Error(`source:${path}: ${observedError.message}`);
   }
 }
 
-function unobservableKindForFailedRetry(path: string): UnobservableSourceKind {
-  const slash = path.lastIndexOf("/");
-  const name = slash === -1 ? path : path.slice(slash + 1);
-
-  return name.includes(".") ? "file" : "directory";
-}
-
 export function isConfirmedAbsent(error: NodeJS.ErrnoException): boolean {
-  return isAbsent(error);
-}
-
-function isAbsent(error: NodeJS.ErrnoException): boolean {
   return error.code === "ENOENT" || error.code === "ENOTDIR";
 }
 

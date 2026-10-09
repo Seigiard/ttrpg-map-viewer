@@ -16,8 +16,6 @@ export interface PassContext {
   readonly beforeMapIndexWrite?: (map: MapNode, present: ReadonlySet<string>) => Effect.Effect<void>;
   readonly categories: ReadonlyMap<CatalogPath, CategoryNode>;
   readonly maps: readonly MapNode[];
-  readonly preservedPrefixes: ReadonlySet<CatalogPath>;
-  readonly skippedDirectories: ReadonlySet<CatalogPath>;
   readonly mapIndexLocks: Map<CatalogPath, Semaphore.Semaphore>;
   readonly refreshLocks: Map<CatalogPath, Semaphore.Semaphore>;
   readonly initialMapWritesRemaining: { count: number };
