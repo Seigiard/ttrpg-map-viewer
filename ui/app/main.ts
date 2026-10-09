@@ -688,6 +688,22 @@ function handleStageKey(key: string): boolean {
   return true;
 }
 
+/**
+ * The shortcut a key press stands for, read from the physical key so that S, D, O, P and / still work under a
+ * Cyrillic or other non-Latin layout, where event.key carries a different letter.
+ */
+function shortcut(event: KeyboardEvent): string {
+  const digit = /^(?:Digit|Numpad)([1-9])$/.exec(event.code);
+
+  if (digit) return digit[1]!;
+
+  const letter = /^Key([A-Z])$/.exec(event.code);
+
+  if (letter) return letter[1]!.toLowerCase();
+
+  return event.code === "Slash" ? "/" : event.key.toLowerCase();
+}
+
 document.addEventListener("keydown", (event) => {
   if (event.metaKey || event.ctrlKey || event.altKey) return;
 
@@ -703,7 +719,9 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
-  if (event.key === "/") {
+  const key = shortcut(event);
+
+  if (key === "/") {
     event.preventDefault();
     filter.focus();
 
@@ -711,7 +729,7 @@ document.addEventListener("keydown", (event) => {
   }
 
   // Enter and the arrows keep their native meaning on a focused button or link outside the tree.
-  const handled = (event.target === tree && handleTreeKey(event.key)) || handleStageKey(event.key.toLowerCase());
+  const handled = (event.target === tree && handleTreeKey(event.key)) || handleStageKey(key);
 
   if (handled) event.preventDefault();
 });
