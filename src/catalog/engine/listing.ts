@@ -8,7 +8,7 @@ export function parentOf(path: CatalogPath): CatalogPath {
   return slash === -1 ? "" : path.slice(0, slash);
 }
 
-export function nameOf(path: CatalogPath): string {
+function nameOf(path: CatalogPath): string {
   return path.slice(path.lastIndexOf("/") + 1);
 }
 

@@ -7,7 +7,7 @@ export interface SourcePolicyFileSystem {
   readonly readdirSync: (path: string) => void;
 }
 
-export const nodeSourcePolicyFileSystem: SourcePolicyFileSystem = { lstatSync, readdirSync };
+const nodeSourcePolicyFileSystem: SourcePolicyFileSystem = { lstatSync, readdirSync };
 
 /** Hidden collection entries are never catalogued, so the engine state directory cannot collide with a source name. */
 function includeCollectionSource(path: string): boolean {
@@ -43,7 +43,7 @@ function classifySourceObservation(sourcePath: string, path: string, fileSystem:
   }
 }
 
-export function isConfirmedAbsent(error: NodeJS.ErrnoException): boolean {
+function isConfirmedAbsent(error: NodeJS.ErrnoException): boolean {
   return error.code === "ENOENT" || error.code === "ENOTDIR";
 }
 

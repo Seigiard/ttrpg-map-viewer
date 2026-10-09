@@ -1,9 +1,9 @@
 import { Effect, Match, Semaphore } from "effect";
 import { join } from "node:path";
-import { compareNames, isAnimatedVariant, type CategoryNode, type FileListing, type MapNode } from "../classify.ts";
+import { isAnimatedVariant, type CategoryNode, type FileListing, type MapNode } from "../classify.ts";
 import { mtimeOrNull, readTextFile, removePath, statPath, type FileSystemError, writeTextFileIfChanged } from "../file-system.ts";
 import { categoryIndexFromPublished, mapIndex, previewPath, searchIndexFromPublished, thumbnailPath } from "../folder-index.ts";
-import { type CatalogPath, INDEX_FILE, LOOSE_MAP_SEGMENT, type MapCard, type MapIndex, SEARCH_FILE } from "../model.ts";
+import { type CatalogPath, INDEX_FILE, type MapIndex, SEARCH_FILE } from "../model.ts";
 import { ensureDerivedImage, PREVIEW_MAX_SIZE, THUMBNAIL_MAX_SIZE, type DerivedImageFailure, type DerivedImageKind } from "../thumbnail.ts";
 import { type CatalogWork, FinalizeIndexesWork, ImageWork, imageWorkKey, MapWork, type PassContext } from "./work.ts";
 import { parentOf } from "./listing.ts";
@@ -73,18 +73,6 @@ function refreshCategory(category: CategoryNode, pass: PassContext): Effect.Effe
 
 function refreshSearch(pass: PassContext): Effect.Effect<readonly CatalogWork[], FileSystemError> {
   return Semaphore.withPermits(lockFor(pass.refreshLocks, "search"), 1, handleSearch(pass));
-}
-
-function compareCards(a: { readonly name: string; readonly path: string }, b: { readonly name: string; readonly path: string }): number {
-  return compareNames(a.name, b.name) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-}
-
-function sortMapCards(cards: readonly MapCard[]): readonly MapCard[] {
-  const [first, ...rest] = cards;
-
-  if (first?.path.endsWith(`/${LOOSE_MAP_SEGMENT}`)) return [first, ...rest.sort(compareCards)];
-
-  return [...cards].sort(compareCards);
 }
 
 function handleMap({ map, pass }: MapWork): Effect.Effect<readonly CatalogWork[], FileSystemError> {
@@ -235,14 +223,7 @@ function handleCategory(category: CategoryNode, pass: PassContext): Effect.Effec
 
     const index = categoryIndexFromPublished(category, byPath);
 
-    yield* writeTextFileIfChanged(
-      join(pass.dataPath, category.path, INDEX_FILE),
-      JSON.stringify({
-        ...index,
-        categories: [...index.categories].sort(compareCards),
-        maps: sortMapCards(index.maps),
-      }),
-    );
+    yield* writeTextFileIfChanged(join(pass.dataPath, category.path, INDEX_FILE), JSON.stringify(index));
 
     return [];
   });

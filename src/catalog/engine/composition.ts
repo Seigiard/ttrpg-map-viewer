@@ -140,8 +140,7 @@ function catalogLiveOptions(
         const listing = listingFromEntries(entries);
 
         const { root } = classifyCollection(listing);
-        const { categories: allCategories, maps } = collectNodes(root);
-        const categories = allCategories;
+        const { categories, maps } = collectNodes(root);
 
         logDiagnostics(listing, maps);
 
@@ -159,7 +158,7 @@ function catalogLiveOptions(
           force: request.force,
           beforeImageWork: options.beforeImageWork,
           beforeMapIndexWrite: options.beforeMapIndexWrite,
-          categories: new Map(allCategories.map((category) => [category.path, category])),
+          categories: new Map(categories.map((category) => [category.path, category])),
           maps: passMaps,
           mapIndexLocks: new Map(),
           refreshLocks: new Map(),

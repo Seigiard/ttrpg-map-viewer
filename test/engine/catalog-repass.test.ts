@@ -622,6 +622,7 @@ describe("a later pass in the same engine session", () => {
   test("Dungeondraft export metadata is published on matching variants", async () => {
     // #given
     await image(join(workspace.collection, "Dungeondraft", "Crypt", "Crypt Day.png"), 120, 80, "png");
+    await image(join(workspace.collection, "Dungeondraft", "Crypt", "Other.png"), 120, 80, "png");
     await writeFile(
       join(workspace.collection, "Dungeondraft", "Crypt", "Crypt.dd2vtt"),
       JSON.stringify({ resolution: { map_size: { x: 24, y: 16 }, pixels_per_grid: 5 } }),
@@ -631,9 +632,11 @@ describe("a later pass in the same engine session", () => {
     await withSession(workspace, async () => undefined);
 
     // #then
-    expect((await readJson<MapIndex>(join(workspace.output, "Dungeondraft", "Crypt", "index.json"))).variants[0]).toEqual(
+    const variants = (await readJson<MapIndex>(join(workspace.output, "Dungeondraft", "Crypt", "index.json"))).variants;
+    expect(variants).toEqual([
       expect.objectContaining({ file: "Crypt Day.png", mapSize: { width: 24, height: 16 }, gridScale: 5 }),
-    );
+      expect.not.objectContaining({ mapSize: expect.anything(), gridScale: expect.anything() }),
+    ]);
   });
 
   test("Print cache survives while its variant is declared and is pruned after deletion", async () => {
@@ -645,20 +648,23 @@ describe("a later pass in the same engine session", () => {
 
       const response = await printImageResponse(request, { filesPath: workspace.collection, dataPath: workspace.output });
       const printPath = join(workspace.output, PIT, "_print", "Original Night.jpg.jpg");
-      expect([response.status, await exists(printPath)]).toEqual([302, true]);
+      const printSignaturePath = `${printPath}.source.json`;
+      expect([response.status, await exists(printPath), await exists(printSignaturePath)]).toEqual([302, true, true]);
 
       // #when
       await passOf(session);
 
       // #then
       expect(await exists(printPath)).toBe(true);
+      expect(await exists(printSignaturePath)).toBe(true);
 
       // #when
-      await rm(join(workspace.collection, PIT, "Original Night.jpg"));
+      await image(join(workspace.collection, PIT, "Original Night.jpg"), 80, 80, "jpeg");
       await passOf(session);
 
       // #then
       expect(await exists(printPath)).toBe(false);
+      expect(await exists(printSignaturePath)).toBe(false);
     });
   });
 });
@@ -762,6 +768,7 @@ describe("failures", () => {
       expect(failed.availableFrom).toBe("prior-output");
       expect(failed.completed).toBe(false);
       expect(failed.errors.map((error) => error.source)).toContain("pass");
+      expect(failed.errors.map((error) => error.message).join("\n")).toContain(workspace.collection);
       expect(await searchPaths()).toContain(PIT);
 
       // #when
@@ -841,7 +848,7 @@ describe("failures", () => {
       await withSession(workspace, async () => undefined);
 
       const outputBefore = await catalogOutputSnapshot();
-      let failObservation = true;
+      let failObservation = false;
       const failedAbsolutePath = join(workspace.collection, sourceCase.relativePath);
 
       const runtime = startEngineRuntime({
@@ -864,8 +871,10 @@ describe("failures", () => {
 
       try {
         await runtime.ready;
+        await waitForRuntimeRecovery(runtime, `${sourceCase.name} initial clean pass`);
 
         // #when
+        failObservation = true;
         await runtime.requestPass();
         await waitForRuntimeError(runtime, sourceCase.relativePath);
 
@@ -935,7 +944,7 @@ describe("failures", () => {
   test("a confirmed-absent ENOTDIR entry reaches the source policy and allows pruning", async () => {
     // #given
     await withSession(workspace, async () => undefined);
-    let reportInner = true;
+    let reportInner = false;
     const absentPath = join(workspace.collection, "Mixed", "Inner");
 
     const runtime = startEngineRuntime({
@@ -952,9 +961,10 @@ describe("failures", () => {
 
     try {
       await runtime.ready;
+      await waitForRuntimeRecovery(runtime, "ENOTDIR initial clean pass");
 
       // #when
-      await rm(absentPath, { recursive: true, force: true });
+      reportInner = true;
       await runtime.requestPass();
       await waitForRuntimeRecovery(runtime, "ENOTDIR confirmed absence prune");
 
