@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "test": "LOG_LEVEL=error bun test test/unit && if [ \"$(uname)\" = Linux ]; then LOG_LEVEL=error bun test test/engine; else echo 'Skipping test/engine on non-Linux; run bun run test:docker'; fi",
     "test:docker": "docker compose -f docker-compose.test.yml run --rm test",
-    "build:ui": "bun ui/scripts/build-ui.ts"
+    "build:ui": "bun ui/scripts/build-ui.ts",
+    "prepare": "if [ -e .git ]; then lefthook install; fi"
   },
   "dependencies": {
     "@seigiard/sync-engine": "0.5.5",
@@ -25,6 +26,7 @@
   "devDependencies": {
     "@oxlint/plugins": "1.87.0",
     "@types/bun": "latest",
+    "lefthook": "2.2.1",
     "oxfmt": "^0.72.0",
     "oxlint": "1.87.0",
     "typescript": "^5"
