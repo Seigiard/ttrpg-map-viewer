@@ -42,6 +42,7 @@ export class ImageWork extends Data.TaggedClass("ImageWork")<{
 export class ClearWorkFailure extends Data.TaggedClass("ClearWorkFailure")<{
   readonly failureKey: string;
   readonly onCleared: (failureKey: string) => void;
+  readonly beforeClear?: (failureKey: string) => Effect.Effect<void>;
 }> {}
 
 export type CatalogWork = MapWork | CategoryWork | SearchWork | FinalizeIndexesWork | ImageWork | ClearWorkFailure;

@@ -35,6 +35,7 @@ export interface CatalogSynchronizationOptions {
   readonly imageFailures?: ImageFailureRegistry;
   readonly beforeImageWork?: (map: MapNode, variant: FileListing, kind: DerivedImageKind) => Effect.Effect<void>;
   readonly beforeMapIndexWrite?: (map: MapNode, present: ReadonlySet<string>) => Effect.Effect<void>;
+  readonly beforeClearWorkFailure?: (failureKey: string) => Effect.Effect<void>;
   readonly sourcePolicyFileSystem?: SourcePolicyFileSystem;
   /** Zero disables the engine's periodic reconciliation. */
   readonly reconcileIntervalMs: number;
@@ -196,13 +197,14 @@ function catalogLiveOptions(
           (failureKey) =>
             new ClearWorkFailure({
               failureKey,
+              beforeClear: options.beforeClearWorkFailure,
               onCleared: () => {
                 pendingStaleFailureKeys.delete(failureKey);
               },
             }),
         );
 
-        retainedFailureKeys = new Set([...declaredFailureKeys, ...pendingStaleFailureKeys]);
+        retainedFailureKeys = declaredFailureKeys;
 
         return {
           minimum: [new CategoryWork({ category: root, pass })],

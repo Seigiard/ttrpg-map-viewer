@@ -641,6 +641,19 @@ describe("a later pass in the same engine session", () => {
     expect(variants[1]).not.toHaveProperty("gridScale");
   });
 
+  test("DnDavid filename metadata is published with image-derived grid scale", async () => {
+    // #given
+    await image(join(workspace.collection, "DnDavid", "Village Square", "Village Square Grid [40x30] (DnDavid).jpg"), 4_001, 3_000, "jpeg");
+
+    // #when
+    await withSession(workspace, async () => undefined);
+
+    // #then
+    const dnDavid = await readJson<MapIndex>(join(workspace.output, "DnDavid", "Village Square", "index.json"));
+    expect(dnDavid).toMatchObject({ author: "DnDavid", mapSize: { width: 40, height: 30 } });
+    expect(dnDavid.variants[0]).toMatchObject({ file: "Village Square Grid [40x30] (DnDavid).jpg", gridScale: 100.025 });
+  });
+
   test("Print cache survives while its variant is declared and is pruned after deletion", async () => {
     // #given
     await withSession(workspace, async (session) => {
@@ -749,6 +762,89 @@ describe("failures", () => {
       expect(Exit.isFailure(failedDeletionPass)).toBe(true);
       expect((await Effect.runPromise(session.status)).work.errors).toEqual([]);
     });
+  });
+
+  test("a removed map failure is not cleared again after a successful cleanup", async () => {
+    await rm(workspace.collection, { recursive: true, force: true });
+    await mkdir(workspace.collection, { recursive: true });
+    await image(join(workspace.collection, "Stable", "Keep.png"), 40, 40, "png");
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          // #given
+          const secondClearEntered = yield* Deferred.make<void>();
+          const mapEntered = yield* Deferred.make<void>();
+          const releaseMap = yield* Deferred.make<void>();
+          let clearCalls = 0;
+          let blockStableMap = false;
+
+          const session = yield* startCatalogSynchronization({
+            ...sessionOptions(workspace),
+            thumbnailConcurrency: 1,
+            beforeClearWorkFailure: (failureKey) => {
+              if (failureKey !== "map:Deleted") return Effect.void;
+
+              return Effect.sync(() => {
+                clearCalls += 1;
+              }).pipe(
+                Effect.andThen(() =>
+                  clearCalls === 1 ? Effect.void : Deferred.succeed(secondClearEntered, undefined).pipe(Effect.andThen(Effect.void)),
+                ),
+              );
+            },
+            beforeMapIndexWrite: (map) => {
+              if (!blockStableMap || map.path !== "Stable") return Effect.void;
+
+              return Deferred.succeed(mapEntered, undefined).pipe(Effect.andThen(Deferred.await(releaseMap)));
+            },
+          });
+
+          yield* session.awaitCompletion;
+          yield* ownedPromise(
+            () => writeFile(join(workspace.output, "Deleted"), "stale file in the way"),
+            (cause) => new Error(String(cause)),
+          );
+          yield* ownedPromise(
+            () => image(join(workspace.collection, "Deleted", "Gone.png"), 40, 40, "png"),
+            (cause) => new Error(String(cause)),
+          );
+          yield* session.requestPass({ force: true });
+          yield* session.awaitCompletion;
+          expect((yield* session.status).work.errors.map(({ work }) => (work._tag === "MapWork" ? work.map.path : work._tag))).toEqual([
+            "Deleted",
+          ]);
+
+          yield* ownedPromise(
+            () => rm(join(workspace.collection, "Deleted"), { recursive: true, force: true }),
+            (cause) => new Error(String(cause)),
+          );
+          yield* session.requestPass({ force: true });
+          yield* session.awaitCompletion;
+          expect((yield* session.status).work.errors).toEqual([]);
+
+          // #when
+          blockStableMap = true;
+          yield* ownedPromise(
+            () => image(join(workspace.collection, "Stable", "Keep.png"), 41, 40, "png"),
+            (cause) => new Error(String(cause)),
+          );
+          yield* session.requestPass({ force: true });
+
+          const nextWork = yield* Effect.race(
+            Deferred.await(mapEntered).pipe(Effect.as("map" as const)),
+            Deferred.await(secondClearEntered).pipe(Effect.as("clear" as const)),
+          );
+
+          // #then
+          expect(nextWork).toBe("map");
+          expect((yield* session.status).work.pending).toBe(2);
+          yield* Deferred.succeed(releaseMap, undefined);
+          yield* session.awaitCompletion;
+          expect(clearCalls).toBe(1);
+        }),
+      ),
+    );
   });
 
   test("a stale root category failure clears when maps return and root CategoryWork is not submitted", async () => {
