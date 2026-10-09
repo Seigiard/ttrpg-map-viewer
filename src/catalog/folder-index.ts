@@ -57,7 +57,7 @@ export function mapIndex(map: MapNode, hasDerivedImage: DerivedImageAvailability
 }
 
 /** A map's card as its published index states it, so category listings follow what a reader can actually open. */
-function mapCardFromIndex(index: MapIndex): MapCard {
+export function mapCardFromIndex(index: MapIndex): MapCard {
   return {
     name: index.name,
     path: index.path,

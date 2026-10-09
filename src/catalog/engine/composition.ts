@@ -6,13 +6,14 @@ import { loadCoverOverrides, selectMapCover, warnUnknownCoverOverrides } from ".
 import { mtimeOrNull, type FileSystemError } from "../file-system.ts";
 import { previewPath, thumbnailPath } from "../folder-index.ts";
 import { enrichMap, loadMetadataSources, readVariantDimensions } from "../metadata.ts";
-import { INDEX_FILE } from "../model.ts";
+import { INDEX_FILE, type CatalogPath } from "../model.ts";
 import { expectedOutputManifest, pruneOrphans } from "../output-manifest.ts";
 import type { DerivedImageFailure, DerivedImageKind } from "../thumbnail.ts";
 import { handleCatalogWork } from "./handlers.ts";
 import { createImageFailureRegistry, type ImageFailureRegistry } from "./image-status.ts";
 import { listingFromEntries } from "./listing.ts";
-import { catalogStatePath, includeObservableCollectionSource, type SourcePolicyFileSystem, type UnobservableSourceKind } from "./policy.ts";
+import { catalogStatePath, includeObservableCollectionSource, type SourcePolicyFileSystem, type UnobservableSource } from "./policy.ts";
+import { createSourceFailureRegistry, type SourceFailureRegistry } from "./source-status.ts";
 import {
   CategoryWork,
   FinalizeIndexesWork,
@@ -31,6 +32,7 @@ export interface CatalogSynchronizationOptions {
   readonly overridesPath: string;
   readonly thumbnailConcurrency: number;
   readonly imageFailures?: ImageFailureRegistry;
+  readonly sourceFailures?: SourceFailureRegistry;
   readonly beforeImageWork?: (map: MapNode, variant: FileListing, kind: DerivedImageKind) => Effect.Effect<void>;
   readonly beforeMapIndexWrite?: (map: MapNode, present: ReadonlySet<string>) => Effect.Effect<void>;
   readonly sourcePolicyFileSystem?: SourcePolicyFileSystem;
@@ -55,6 +57,54 @@ function collectNodes(root: CategoryNode): CatalogNodes {
   }
 
   return { categories, maps };
+}
+
+function parentOf(path: CatalogPath): CatalogPath {
+  const slash = path.lastIndexOf("/");
+
+  return slash === -1 ? "" : path.slice(0, slash);
+}
+
+function nameOf(path: CatalogPath): string {
+  return path.slice(path.lastIndexOf("/") + 1);
+}
+
+function compareCatalogCards(
+  a: { readonly name: string; readonly path: string },
+  b: { readonly name: string; readonly path: string },
+): number {
+  return a.name.localeCompare(b.name, "en", { numeric: true, sensitivity: "base" }) || a.path.localeCompare(b.path);
+}
+
+function ensureSkippedAncestors(root: CategoryNode, skippedDirectories: ReadonlySet<CatalogPath>): CategoryNode {
+  const byPath = new Map<CatalogPath, CategoryNode>();
+  const pending = [root];
+
+  for (let category = pending.pop(); category; category = pending.pop()) {
+    byPath.set(category.path, category);
+    pending.push(...category.categories);
+  }
+
+  for (const skipped of skippedDirectories) {
+    for (let ancestor = parentOf(skipped); ancestor !== ""; ancestor = parentOf(ancestor)) {
+      if (!byPath.has(ancestor))
+        byPath.set(ancestor, { kind: "category", name: nameOf(ancestor), path: ancestor, categories: [], maps: [] });
+    }
+  }
+
+  function rebuild(category: CategoryNode): CategoryNode {
+    const children = [...byPath.values()]
+      .flatMap((candidate) =>
+        candidate.path !== "" && parentOf(candidate.path) === category.path && !skippedDirectories.has(candidate.path)
+          ? [rebuild(candidate)]
+          : [],
+      )
+      .sort(compareCatalogCards);
+
+    return { ...category, categories: children };
+  }
+
+  return rebuild(byPath.get("") ?? root);
 }
 
 function logDiagnostics(listing: FolderListing, maps: readonly MapNode[]): void {
@@ -95,7 +145,8 @@ function catalogLiveOptions(
   options: CatalogSynchronizationOptions,
 ): LiveOptions<CatalogWork, FileSystemError | DerivedImageFailure, never> {
   const imageFailures = options.imageFailures ?? createImageFailureRegistry();
-  const unobservableSources = new Map<string, UnobservableSourceKind>();
+  const sourceFailures = options.sourceFailures ?? createSourceFailureRegistry();
+  const unobservableSources = new Map<string, UnobservableSource>();
 
   return {
     sourcePath: options.filesPath,
@@ -105,7 +156,7 @@ function catalogLiveOptions(
       includeObservableCollectionSource(
         options.filesPath,
         path,
-        (unobservable, kind) => unobservableSources.set(unobservable, kind),
+        (unobservable, source) => unobservableSources.set(unobservable, source),
         options.sourcePolicyFileSystem,
       ),
     reconcileIntervalMs: options.reconcileIntervalMs,
@@ -141,11 +192,18 @@ function catalogLiveOptions(
     declare: (entries: readonly SourceEntry[], request) =>
       Effect.gen(function* () {
         const startedAt = Date.now();
-        const unobservable = new Map(unobservableSources);
-        const preservePrefixes = [...unobservable.keys()];
-        const skippedDirectories = new Set([...unobservable].flatMap(([path, kind]) => (kind === "directory" ? [path] : [])));
-        unobservableSources.clear();
         const entryPaths = new Set(entries.map((entry) => entry.path));
+        const unobservable = new Map([...unobservableSources].filter(([path]) => !entryPaths.has(path)));
+        const preservePrefixes = [...unobservable.keys()];
+        const skippedDirectories = new Set([...unobservable].flatMap(([path, source]) => (source.kind === "directory" ? [path] : [])));
+        unobservableSources.clear();
+
+        sourceFailures.retain(skippedDirectories);
+
+        for (const [path, source] of unobservable) {
+          sourceFailures.record(path, source.message);
+          log.warn("Generate", "Source entry skipped", { path, error: source.message });
+        }
 
         const listing = listingFromEntries([
           ...entries,
@@ -154,7 +212,8 @@ function catalogLiveOptions(
           ),
         ]);
 
-        const { root } = classifyCollection(listing);
+        const { root: classifiedRoot } = classifyCollection(listing);
+        const root = ensureSkippedAncestors(classifiedRoot, skippedDirectories);
         const { categories: allCategories, maps } = collectNodes(root);
         const categories = allCategories.filter((category) => !skippedDirectories.has(category.path));
 
@@ -169,9 +228,6 @@ function catalogLiveOptions(
         const pass: PassContext = {
           filesPath: options.filesPath,
           dataPath: options.dataPath,
-          listing,
-          overrides,
-          metadata,
           dimensions,
           imageFailures,
           force: request.force,
@@ -180,6 +236,8 @@ function catalogLiveOptions(
           categories: new Map(allCategories.map((category) => [category.path, category])),
           maps: passMaps,
           skippedDirectories,
+          mapIndexLocks: new Map(),
+          refreshLocks: new Map(),
           initialMapWritesRemaining: { count: passMaps.length },
           failedInitialMaps: new Set(),
         };

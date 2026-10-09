@@ -43,6 +43,36 @@ async function waitFor(path: string, label: string): Promise<void> {
   throw new Error(`${label} did not appear`);
 }
 
+async function waitForRuntimeRecovery(runtime: ReturnType<typeof startEngineRuntime>, label: string): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const status = await runtime.status();
+
+    if (status.completed && status.errors.length === 0) return;
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  throw new Error(`${label} did not recover`);
+}
+
+async function waitForRuntimeError(runtime: ReturnType<typeof startEngineRuntime>, expected: string): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const status = await runtime.status();
+
+    if (
+      status.errors
+        .map((error) => error.message)
+        .join("\n")
+        .includes(expected)
+    )
+      return;
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  throw new Error(`runtime error did not include ${expected}`);
+}
+
 const searchPaths = async () => (await readJson<SearchIndex>(join(workspace.output, "search.json"))).maps.map((map) => map.path);
 
 describe("a later pass in the same engine session", () => {
@@ -124,16 +154,20 @@ describe("a later pass in the same engine session", () => {
               for (let attempt = 0; attempt < 50; attempt += 1) {
                 const first = await readJson<MapIndex>(join(workspace.output, "AAA First", "index.json"));
                 const variant = first.variants[0]!;
+                const root = await readJson<CategoryIndex>(join(workspace.output, "index.json"));
+                const search = await readJson<SearchIndex>(join(workspace.output, "search.json"));
 
                 if (
                   variant.preview === "AAA First/_previews/First.png.webp" &&
-                  variant.thumbnail === "AAA First/_thumbnails/First.png.webp"
+                  variant.thumbnail === "AAA First/_thumbnails/First.png.webp" &&
+                  root.maps.find((map) => map.path === "AAA First")?.cover.thumbnail === "AAA First/_thumbnails/First.png.webp" &&
+                  search.maps.find((map) => map.path === "AAA First")?.thumbnail === "AAA First/_thumbnails/First.png.webp"
                 )
                   return;
                 await new Promise((resolve) => setTimeout(resolve, 10));
               }
 
-              throw new Error("first map references did not publish while later preview was held");
+              throw new Error("first map references did not reach map, category and search while later preview was held");
             },
             (cause) => new Error(String(cause)),
           );
@@ -146,18 +180,6 @@ describe("a later pass in the same engine session", () => {
 
           expect(held.variants[0]?.preview).toBeNull();
 
-          const root = yield* ownedPromise(
-            () => readJson<CategoryIndex>(join(workspace.output, "index.json")),
-            (cause) => new Error(String(cause)),
-          );
-
-          const search = yield* ownedPromise(
-            () => readJson<SearchIndex>(join(workspace.output, "search.json")),
-            (cause) => new Error(String(cause)),
-          );
-
-          expect(root.maps.find((map) => map.path === "AAA First")?.cover.thumbnail).toBe("AAA First/_thumbnails/First.png.webp");
-          expect(search.maps.find((map) => map.path === "AAA First")?.thumbnail).toBe("AAA First/_thumbnails/First.png.webp");
           yield* Deferred.succeed(release, undefined);
           yield* session.awaitCompletion;
         }),
@@ -602,6 +624,163 @@ describe("failures", () => {
     expect(await exists(join(workspace.output, "Mixed", "._loose", "_thumbnails", "Loose.png.webp"))).toBe(true);
   });
 
+  test("an unreadable subfolder is reported in runtime status and clears after recovery", async () => {
+    let innerUnreadable = false;
+
+    const runtime = startEngineRuntime({
+      ...sessionOptions(workspace),
+      sourcePolicyFileSystem: {
+        lstatSync,
+        readdirSync: (path) => {
+          if (innerUnreadable && path === join(workspace.collection, "Mixed", "Inner")) throw new Error("simulated unreadable directory");
+
+          return readdirSync(path);
+        },
+      },
+    });
+
+    try {
+      await runtime.ready;
+      innerUnreadable = true;
+
+      // #when
+      await runtime.requestPass();
+      await waitForRuntimeError(runtime, "source:Mixed/Inner");
+      const failed = await runtime.status();
+
+      // #then
+      expect(failed.errors.map((error) => error.message).join("\n")).toContain("source:Mixed/Inner");
+      expect(failed.errors.map((error) => error.message).join("\n")).toContain("simulated unreadable directory");
+
+      // #when
+      innerUnreadable = false;
+      await runtime.requestPass();
+      await waitForRuntimeRecovery(runtime, "unreadable subfolder");
+
+      // #then
+      expect((await runtime.status()).errors).toEqual([]);
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  test("an unreadable only-child map folder keeps its ancestor category, prior map output and search", async () => {
+    let ruinsUnreadable = false;
+
+    await withSession(workspace, async () => undefined);
+
+    const packBefore = await readFile(join(workspace.output, "Pack 09", "index.json"), "utf8");
+    const ruinsBefore = await readFile(join(workspace.output, "Pack 09", "Ancient Ruins", "index.json"), "utf8");
+
+    const runtime = startEngineRuntime({
+      ...sessionOptions(workspace),
+      sourcePolicyFileSystem: {
+        lstatSync,
+        readdirSync: (path) => {
+          if (ruinsUnreadable && path === join(workspace.collection, "Pack 09", "Ancient Ruins"))
+            throw new Error("simulated unreadable ruins");
+
+          return readdirSync(path);
+        },
+      },
+    });
+
+    try {
+      await runtime.ready;
+      ruinsUnreadable = true;
+
+      // #when
+      await runtime.requestPass();
+      await waitForRuntimeError(runtime, "source:Pack 09/Ancient Ruins");
+
+      // #then
+      const root = await readJson<CategoryIndex>(join(workspace.output, "index.json"));
+      expect(root.categories.map((category) => category.path)).toContain("Pack 09");
+      expect(await readFile(join(workspace.output, "Pack 09", "index.json"), "utf8")).toBe(packBefore);
+      expect(await readFile(join(workspace.output, "Pack 09", "Ancient Ruins", "index.json"), "utf8")).toBe(ruinsBefore);
+      expect(await searchPaths()).toContain("Pack 09/Ancient Ruins");
+      expect((await runtime.status()).errors.map((error) => error.message).join("\n")).toContain("source:Pack 09/Ancient Ruins");
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  test("a non-ENOENT lstat failure is preserved and reported instead of pruned", async () => {
+    let ruinsUnobservable = false;
+
+    await withSession(workspace, async () => undefined);
+
+    const failingLstatSync = (path: string) => {
+      if (ruinsUnobservable && path === join(workspace.collection, "Pack 09", "Ancient Ruins")) {
+        const error = new Error("simulated EACCES");
+
+        Object.assign(error, { code: "EACCES" });
+        throw error;
+      }
+
+      return lstatSync(path);
+    };
+
+    const runtime = startEngineRuntime({
+      ...sessionOptions(workspace),
+      sourcePolicyFileSystem: {
+        lstatSync: failingLstatSync,
+        readdirSync,
+      },
+    });
+
+    try {
+      await runtime.ready;
+      ruinsUnobservable = true;
+
+      // #when
+      await runtime.requestPass();
+      await waitForRuntimeError(runtime, "simulated EACCES");
+
+      // #then
+      expect(await exists(join(workspace.output, "Pack 09", "Ancient Ruins", "index.json"))).toBe(true);
+      expect(await searchPaths()).toContain("Pack 09/Ancient Ruins");
+      expect((await runtime.status()).errors.map((error) => error.message).join("\n")).toContain("simulated EACCES");
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  test("a readable-again skipped directory rewrites its category once and does not duplicate search entries", async () => {
+    let innerUnreadable = false;
+
+    const runtime = startEngineRuntime({
+      ...sessionOptions(workspace),
+      sourcePolicyFileSystem: {
+        lstatSync,
+        readdirSync: (path) => {
+          if (innerUnreadable && path === join(workspace.collection, "Mixed", "Inner")) throw new Error("simulated unreadable directory");
+
+          return readdirSync(path);
+        },
+      },
+    });
+
+    try {
+      await runtime.ready;
+      innerUnreadable = true;
+      await runtime.requestPass();
+
+      // #when
+      innerUnreadable = false;
+      await runtime.requestPass();
+      await waitForRuntimeRecovery(runtime, "readable-again directory");
+
+      // #then
+      expect((await readJson<CategoryIndex>(join(workspace.output, "Mixed", "index.json"))).maps.map((map) => map.path)).toContain(
+        "Mixed/Inner",
+      );
+      expect((await searchPaths()).filter((path) => path === "Mixed/Inner")).toHaveLength(1);
+    } finally {
+      await runtime.stop();
+    }
+  });
+
   test("a broken symlink under a map is not preserved as an unreadable directory", async () => {
     // #given
     await symlink("missing.png", join(workspace.collection, "Mixed", "Inner", "Broken.png"));
@@ -663,6 +842,12 @@ describe("failures", () => {
     await writeFile(join(workspace.collection, "Mixed", "Inner", "Room.jpg"), "not an image");
     await withSession(workspace, async (session) => {
       await passOf(session);
+
+      const category = await readJson<CategoryIndex>(join(workspace.output, "Mixed", "index.json"));
+      expect(category.maps.find((map) => map.path === "Mixed/Inner")?.cover.thumbnail).toBeNull();
+      expect(
+        (await readJson<SearchIndex>(join(workspace.output, "search.json"))).maps.find((map) => map.path === "Mixed/Inner")?.thumbnail,
+      ).toBeNull();
     });
 
     // #when

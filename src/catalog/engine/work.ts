@@ -1,7 +1,6 @@
-import { Data, Effect, Match } from "effect";
-import type { CategoryNode, FileListing, FolderListing, MapNode } from "../classify.ts";
-import type { CoverOverrides } from "../cover.ts";
-import type { MetadataSources, VariantDimensions } from "../metadata.ts";
+import { Data, Effect, Match, Semaphore } from "effect";
+import type { CategoryNode, FileListing, MapNode } from "../classify.ts";
+import type { VariantDimensions } from "../metadata.ts";
 import type { CatalogPath } from "../model.ts";
 import type { DerivedImageKind } from "../thumbnail.ts";
 import type { ImageFailureRegistry } from "./image-status.ts";
@@ -10,9 +9,6 @@ import type { ImageFailureRegistry } from "./image-status.ts";
 export interface PassContext {
   readonly filesPath: string;
   readonly dataPath: string;
-  readonly listing: FolderListing;
-  readonly overrides: CoverOverrides;
-  readonly metadata: MetadataSources;
   readonly dimensions: VariantDimensions;
   readonly imageFailures: ImageFailureRegistry;
   readonly force: boolean;
@@ -21,6 +17,8 @@ export interface PassContext {
   readonly categories: ReadonlyMap<CatalogPath, CategoryNode>;
   readonly maps: readonly MapNode[];
   readonly skippedDirectories: ReadonlySet<CatalogPath>;
+  readonly mapIndexLocks: Map<CatalogPath, Semaphore.Semaphore>;
+  readonly refreshLocks: Map<CatalogPath, Semaphore.Semaphore>;
   readonly initialMapWritesRemaining: { count: number };
   readonly failedInitialMaps: Set<CatalogPath>;
 }
@@ -48,7 +46,7 @@ export function imageWorkKey(mapPath: CatalogPath, variantName: string, kind: De
   return JSON.stringify(["image", mapPath, variantName, kind]);
 }
 
-/** Equal keys combine while pending, so a category or the search index runs once after the maps it depends on. */
+/** Equal pending keys combine; keys also identify freshness records and retained work failures. */
 export function workKey(work: CatalogWork): string {
   return Match.value(work).pipe(
     Match.tagsExhaustive({
