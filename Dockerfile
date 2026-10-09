@@ -1,8 +1,9 @@
 FROM oven/bun:1-alpine AS base
-RUN apk add --no-cache ffmpeg inotify-tools nginx unzip util-linux
+RUN apk add --no-cache ffmpeg inotify-tools nginx util-linux
 WORKDIR /app
 
 FROM base AS development
+RUN apk add --no-cache unzip
 COPY package.json bun.lock ./
 COPY vendor ./vendor
 RUN bun install --frozen-lockfile

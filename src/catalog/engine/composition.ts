@@ -85,10 +85,6 @@ function variantSourcePath(map: MapNode, variant: FileListing): string {
   return map.sourcePath === "" ? variant.name : `${map.sourcePath}/${variant.name}`;
 }
 
-function orderedVariants(map: MapNode): readonly FileListing[] {
-  return [map.cover, ...map.variants.filter((variant) => variant !== map.cover)];
-}
-
 /**
  * The TTRPG declaration of a live session. The engine owns scanning, scheduling, reconciliation and shutdown;
  * this module only gives the observed source its meaning and says what each index depends on.
@@ -97,7 +93,8 @@ function catalogLiveOptions(
   options: CatalogSynchronizationOptions,
 ): LiveOptions<CatalogWork, FileSystemError | DerivedImageFailure, never> {
   const imageFailures = options.imageFailures ?? createImageFailureRegistry();
-  let previousFailureKeys = new Set<string>();
+  let retainedFailureKeys = new Set<string>();
+  const pendingStaleFailureKeys = new Set<string>();
 
   return {
     sourcePath: options.filesPath,
@@ -185,17 +182,27 @@ function catalogLiveOptions(
                 new FinalizeIndexesWork({ pass }),
                 ...passMaps.map((map) => new ImageWork({ map, variant: map.cover, pass })),
                 ...passMaps.flatMap((map) =>
-                  orderedVariants(map).flatMap((variant) => (variant === map.cover ? [] : [new ImageWork({ map, variant, pass })])),
+                  map.variants.flatMap((variant) => (variant === map.cover ? [] : [new ImageWork({ map, variant, pass })])),
                 ),
               ];
 
-        const declaredFailureKeys = new Set([...work.map(workFailureKey), workFailureKey(new CategoryWork({ category: root, pass }))]);
+        const declaredFailureKeys = new Set(work.map(workFailureKey));
 
-        const staleFailures = [...previousFailureKeys].flatMap((failureKey) =>
-          declaredFailureKeys.has(failureKey) ? [] : [new ClearWorkFailure({ failureKey })],
+        for (const failureKey of retainedFailureKeys) {
+          if (!declaredFailureKeys.has(failureKey)) pendingStaleFailureKeys.add(failureKey);
+        }
+
+        const staleFailures = [...pendingStaleFailureKeys].map(
+          (failureKey) =>
+            new ClearWorkFailure({
+              failureKey,
+              onCleared: () => {
+                pendingStaleFailureKeys.delete(failureKey);
+              },
+            }),
         );
 
-        previousFailureKeys = declaredFailureKeys;
+        retainedFailureKeys = new Set([...declaredFailureKeys, ...pendingStaleFailureKeys]);
 
         return {
           minimum: [new CategoryWork({ category: root, pass })],

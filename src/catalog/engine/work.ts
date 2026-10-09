@@ -41,6 +41,7 @@ export class ImageWork extends Data.TaggedClass("ImageWork")<{
 
 export class ClearWorkFailure extends Data.TaggedClass("ClearWorkFailure")<{
   readonly failureKey: string;
+  readonly onCleared: (failureKey: string) => void;
 }> {}
 
 export type CatalogWork = MapWork | CategoryWork | SearchWork | FinalizeIndexesWork | ImageWork | ClearWorkFailure;
@@ -49,7 +50,7 @@ export function imageWorkKey(mapPath: CatalogPath, variantName: string, kind: De
   return JSON.stringify(["image", mapPath, variantName, kind]);
 }
 
-/** Equal pending keys combine; keys also identify retained work failures. */
+/** Equal pending keys combine. */
 export function workKey(work: CatalogWork): string {
   return Match.value(work).pipe(
     Match.tagsExhaustive({
@@ -63,15 +64,7 @@ export function workKey(work: CatalogWork): string {
   );
 }
 
+/** Identifies retained work failures. ClearWorkFailure targets the key of another failed item. */
 export function workFailureKey(work: CatalogWork): string {
-  return Match.value(work).pipe(
-    Match.tagsExhaustive({
-      MapWork: ({ map }) => `map:${map.path}`,
-      CategoryWork: ({ category }) => `category:${category.path}`,
-      SearchWork: () => "search",
-      FinalizeIndexesWork: () => "finalize-indexes",
-      ImageWork: ({ map, variant }) => imageWorkKey(map.path, variant.name, "preview"),
-      ClearWorkFailure: ({ failureKey }) => failureKey,
-    }),
-  );
+  return work instanceof ClearWorkFailure ? work.failureKey : workKey(work);
 }

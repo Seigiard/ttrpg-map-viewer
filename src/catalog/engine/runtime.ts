@@ -2,7 +2,7 @@ import { Cause, Effect, Fiber, Schedule } from "effect";
 import { log } from "../../logging/index.ts";
 import { type CatalogSynchronizationOptions, startCatalogSynchronization } from "./composition.ts";
 import { createImageFailureRegistry } from "./image-status.ts";
-import { workKey } from "./work.ts";
+import { workFailureKey } from "./work.ts";
 
 const REPORT_INTERVAL_MS = 5_000;
 
@@ -51,7 +51,7 @@ export function startEngineRuntime(options: CatalogSynchronizationOptions): Engi
       const status = yield* live.status;
 
       const workErrors = [
-        ...status.work.errors.map((error) => ({ work: workKey(error.work), message: describeCause(error.cause) })),
+        ...status.work.errors.map((error) => ({ work: workFailureKey(error.work), message: describeCause(error.cause) })),
         ...imageFailures.snapshot(),
       ];
 

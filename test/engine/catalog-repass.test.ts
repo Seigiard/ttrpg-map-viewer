@@ -635,8 +635,10 @@ describe("a later pass in the same engine session", () => {
     const variants = (await readJson<MapIndex>(join(workspace.output, "Dungeondraft", "Crypt", "index.json"))).variants;
     expect(variants).toEqual([
       expect.objectContaining({ file: "Crypt Day.png", mapSize: { width: 24, height: 16 }, gridScale: 5 }),
-      expect.not.objectContaining({ mapSize: expect.anything(), gridScale: expect.anything() }),
+      expect.objectContaining({ file: "Other.png" }),
     ]);
+    expect(variants[1]).not.toHaveProperty("mapSize");
+    expect(variants[1]).not.toHaveProperty("gridScale");
   });
 
   test("Print cache survives while its variant is declared and is pruned after deletion", async () => {
@@ -720,6 +722,55 @@ describe("failures", () => {
       // #then
       expect((await Effect.runPromise(session.status)).work.errors).toEqual([]);
       expect(await searchPaths()).not.toContain("Pack 09/Deleted Keep");
+    });
+  });
+
+  test("a removed map failure is cleared only after the cleanup work survives freshness invalidation", async () => {
+    // #given
+    await withSession(workspace, async (session) => {
+      const deletedMapPath = join(workspace.collection, "Pack 09", "Deleted After Freshness Failure");
+      await writeFile(join(workspace.output, "Pack 09", "Deleted After Freshness Failure"), "stale file in the way");
+      await image(join(deletedMapPath, "Keep Day.png"), 40, 40, "png");
+      await passOf(session);
+      expect(
+        (await Effect.runPromise(session.status)).work.errors.map(({ work }) => (work._tag === "MapWork" ? work.map.path : work._tag)),
+      ).toEqual(["Pack 09/Deleted After Freshness Failure"]);
+      await rm(deletedMapPath, { recursive: true, force: true });
+      const freshnessTemporary = join(workspace.output, ".sync-engine", "freshness.json.tmp");
+      await mkdir(freshnessTemporary, { recursive: true });
+
+      // #when
+      await Effect.runPromise(session.requestPass());
+      const failedDeletionPass = await Effect.runPromise(Effect.exit(session.awaitCompletion));
+      await rm(freshnessTemporary, { recursive: true, force: true });
+      await passOf(session);
+
+      // #then
+      expect(Exit.isFailure(failedDeletionPass)).toBe(true);
+      expect((await Effect.runPromise(session.status)).work.errors).toEqual([]);
+    });
+  });
+
+  test("a stale root category failure clears when maps return and root CategoryWork is not submitted", async () => {
+    // #given
+    await withSession(workspace, async (session) => {
+      const moved = `${workspace.collection}-with-maps`;
+      await rename(workspace.collection, moved);
+      await mkdir(workspace.collection);
+      await rm(join(workspace.output, "index.json"));
+      await mkdir(join(workspace.output, "index.json"));
+
+      await passOf(session);
+      expect((await Effect.runPromise(session.status)).work.errors.map(({ work }) => work._tag)).toEqual(["CategoryWork"]);
+
+      // #when
+      await rm(join(workspace.output, "index.json"), { recursive: true, force: true });
+      await rm(workspace.collection, { recursive: true, force: true });
+      await rename(moved, workspace.collection);
+      await passOf(session);
+
+      // #then
+      expect((await Effect.runPromise(session.status)).work.errors).toEqual([]);
     });
   });
 
