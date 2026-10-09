@@ -154,7 +154,7 @@
 
     "@oxlint/plugins": ["@oxlint/plugins@1.87.0", "", {}, "sha512-OtSZ6NxNkS7bkVy7zk9zGnajz2hVIu0uRPP/dJvJesGRaXtimpA4lpxap7FaIJndG2UIoKhnBU4DxyDQIWv6yg=="],
 
-    "@seigiard/sync-engine": ["@seigiard/sync-engine@vendor/seigiard-sync-engine-0.5.5.tgz", { "peerDependencies": { "effect": "4.0.1" } }, "sha512-ng0J22B9zgbSALfx/6gEwjBIKmHIn0pJE9EAxv4ayabLDqYXRPmPYHqhTArnuNqi3Pw3I01bm/trMX42+rPV5A=="],
+    "@seigiard/sync-engine": ["@seigiard/sync-engine@vendor/seigiard-sync-engine-0.5.5.tgz", { "peerDependencies": { "effect": "4.0.1" } }, "sha512-G2Wt1V62P9ciywD4E/2c7l9vjXPzjokQy7c5WWNY8HKFP8hWpKUZr0fZ7M9fNFkVj4a9FVUEIqN2tyA4GZbv0Q=="],
 
     "@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
 
