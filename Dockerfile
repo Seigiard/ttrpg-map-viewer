@@ -4,6 +4,7 @@ WORKDIR /app
 
 FROM base AS development
 COPY package.json bun.lock ./
+COPY vendor ./vendor
 RUN bun install --frozen-lockfile
 
 FROM development AS ui
@@ -24,6 +25,7 @@ RUN git clone "$(sed -n '1p' /vendor/UPSTREAM)" planar \
 
 FROM base AS production
 COPY package.json bun.lock ./
+COPY vendor ./vendor
 RUN bun install --frozen-lockfile --production
 COPY src ./src
 COPY --from=ui /app/static ./static
