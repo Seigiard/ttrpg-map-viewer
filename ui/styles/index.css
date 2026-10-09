@@ -1,171 +1,537 @@
-/* Deliberately plain: visual style is chosen later on real data. */
+/*
+ * Dense index: a keyboard-driven list on the left, the map on a neutral stage on the right.
+ * Warm dark stone around the list; the stage is a hue-free mid grey so map colours read true.
+ * Extra-wide Roboto Flex titles over book-like old-style text; both cover Cyrillic.
+ */
 :root {
-  color-scheme: light dark;
-  font-family: system-ui, sans-serif;
-  font-size: 14px;
+  color-scheme: dark;
+  --stone: oklch(28% 0.009 67);
+  --stone-raised: oklch(32.9% 0.013 67);
+  --rule: oklch(37.3% 0.015 67);
+  --text: oklch(92.2% 0.023 82);
+  --text-dim: oklch(68.5% 0.024 74);
+  --cursor: oklch(81.4% 0.051 128);
+  --cursor-hover: color-mix(in oklch, var(--cursor), white 12%);
+  --cursor-text: oklch(25.2% 0.02 129);
+  --stage: oklch(40.6% 0 none);
+  --stage-edge: color-mix(in oklch, var(--stage), black 15%);
+  --sheet-line: color-mix(in oklch, var(--cursor) 95%, transparent);
+  --caption-text: oklch(95.9% 0.01 87);
+  --caption-shade: oklch(0% 0 none / 0.75);
+  --text-font: "Iowan Old Style", "Palatino Linotype", "URW Palladio L", P052, serif;
+  --title-font: "Roboto Flex", "Helvetica Neue", Arial, sans-serif;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* The page is an app shell: only inner panes scroll, so the whole window must not rubber-band on a trackpad. */
+html {
+  overscroll-behavior-y: none;
 }
 
 body {
-  background: Canvas;
-  color: CanvasText;
+  background: var(--stone);
+  color: var(--text);
+  font: 15px/1.45 var(--text-font);
+  font-variant-numeric: lining-nums;
 }
 
-main {
-  padding: 12px 16px;
-}
-
-h1 {
-  font-size: 1.4rem;
-  margin-block: 4px 12px;
-}
-
-ul {
-  list-style: none;
-  padding: 0;
-}
-
-.breadcrumbs {
-  color: GrayText;
-}
-
-.header {
-  margin-bottom: 12px;
-}
-
-.search-input {
-  width: min(100%, 360px);
-}
-
-.search-results {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 8px;
-}
-
-.search-results a {
-  display: grid;
-  grid-template-columns: 64px 1fr;
-  gap: 2px 8px;
+a {
   color: inherit;
-  text-decoration: none;
 }
 
-.search-thumb {
-  grid-row: span 3;
-  width: 64px;
-  height: 64px;
-  object-fit: contain;
-  background: color-mix(in srgb, CanvasText 8%, Canvas);
+:focus-visible {
+  outline: 2px solid var(--cursor);
+  outline-offset: 2px;
 }
 
-.search-context {
-  color: GrayText;
-  overflow-wrap: anywhere;
+kbd {
+  display: inline-block;
+  min-inline-size: 1.6em;
+  padding-block: 1px 2px;
+  padding-inline: 4px;
+  border: 1px solid var(--rule);
+  border-block-end-width: 2px;
+  border-radius: 3px;
+  font: 500 11px/1.2 var(--text-font);
+  text-align: center;
 }
 
-.categories {
+#app {
+  display: grid;
+  grid-template-columns: minmax(320px, 440px) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  block-size: 100dvh;
+}
+
+/* ---------- path bar ---------- */
+
+.pathbar {
+  grid-column: 1 / -1;
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding-block: 10px;
+  padding-inline: 16px;
+  border-block-end: 1px solid var(--rule);
+}
+
+.crumbs {
+  display: flex;
+  flex: 1;
   gap: 6px;
-  margin-bottom: 16px;
+  min-inline-size: 0;
+  overflow: clip;
+  color: var(--text-dim);
+  white-space: nowrap;
 }
 
-.categories a {
-  display: block;
-  padding: 4px 10px;
-  border: 1px solid GrayText;
-  border-radius: 4px;
+.crumbs a {
   text-decoration: none;
 }
 
-.maps {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 12px;
+.crumbs a:last-child {
+  color: var(--text);
 }
 
-.maps a {
+.crumbs a:active {
+  color: var(--cursor);
+}
+
+.crumbs a + a::before {
+  content: "/";
+  margin-inline-end: 6px;
+  color: var(--rule);
+}
+
+.filter {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  color: inherit;
-  text-decoration: none;
+  align-items: center;
+  gap: 8px;
+  inline-size: min(360px, 45vw);
+  padding-block: 5px;
+  padding-inline: 8px;
+  border-radius: 4px;
+  background: var(--stone-raised);
 }
 
-.thumb {
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: contain;
-  background: color-mix(in srgb, CanvasText 8%, Canvas);
+/* The ring goes around the whole field, kbd hint included, so the input's own ring stays transparent. */
+.filter:has(input:focus-visible) {
+  outline: 2px solid var(--cursor);
+  outline-offset: 0;
 }
 
-.thumb-missing {
+.filter input {
+  flex: 1;
+  min-inline-size: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+}
+
+.filter input:focus-visible {
+  outline-color: transparent;
+}
+
+.filter input::placeholder {
+  color: var(--text-dim);
+}
+
+/* ---------- index list ---------- */
+
+.index {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-block: 6px;
+  border-inline-end: 1px solid var(--rule);
+}
+
+/* The bright cursor bar is the focus indicator here; it dims when focus leaves the list. */
+.index:focus-visible {
+  outline-color: transparent;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto 24px;
+  align-items: center;
+  gap: 10px;
+  block-size: 34px;
+  padding-inline: calc(12px + var(--depth, 0) * 16px) 12px;
+  cursor: default;
+}
+
+.row:active {
+  background: var(--stone-raised);
+}
+
+.row .thumb {
   display: grid;
   place-items: center;
-  color: GrayText;
+  inline-size: 44px;
+  block-size: 28px;
 }
 
-.preview {
-  display: block;
-  width: min(100%, 2048px);
-  max-height: 80vh;
+.row .thumb img {
+  max-inline-size: 44px;
+  max-block-size: 28px;
+}
+
+.row .name {
+  overflow: clip;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row .context {
+  margin-inline-start: 8px;
+  color: var(--text-dim);
+}
+
+.row .size,
+.row .count {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums lining-nums;
+  text-align: end;
+}
+
+.row.category .name {
+  font-weight: 700;
+}
+
+.row.category .thumb::before {
+  content: "";
+  border: 5px solid transparent;
+  border-inline-start: 7px solid var(--text-dim);
+  translate: 3px 0;
+}
+
+.row.category.open .thumb::before {
+  translate: 0 3px;
+  rotate: 90deg;
+}
+
+.index:focus .row.cursor {
+  background: var(--cursor);
+  color: var(--cursor-text);
+}
+
+.index:focus .row.cursor :is(.size, .count, .context) {
+  color: var(--cursor-text);
+}
+
+.index:focus .row.cursor.category .thumb::before {
+  border-inline-start-color: var(--cursor-text);
+}
+
+.index:not(:focus) .row.cursor {
+  background: var(--stone-raised);
+}
+
+.empty {
+  padding: 16px;
+  color: var(--text-dim);
+}
+
+/* ---------- stage ---------- */
+
+.stage {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-inline-size: 0;
+  background: var(--stage);
+}
+
+.viewport {
+  display: grid;
+  place-items: center;
+  min-block-size: 0;
+  padding: 20px;
+  overflow: clip;
+}
+
+.plate {
+  position: relative;
+  overflow: clip;
+  box-shadow: 0 0 0 1px var(--stage-edge);
+}
+
+.plate :is(img, video) {
+  inline-size: 100%;
+  block-size: 100%;
+  max-inline-size: none;
   object-fit: contain;
-  background: color-mix(in srgb, CanvasText 8%, Canvas);
 }
 
-.actions {
+.sheets {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms var(--ease-out);
+}
+
+.sheets.on {
+  opacity: 1;
+}
+
+.sheets i {
+  border: 1px dashed var(--sheet-line);
+}
+
+.notice {
+  color: var(--text-dim);
+}
+
+.contact {
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  align-self: start;
+  gap: 6px;
+  inline-size: 100%;
+  block-size: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Soaks up the last row's free space, so its tiles keep their proportions instead of stretching. */
+.contact::after {
+  content: "";
+  flex-grow: 1000;
+}
+
+.contact a {
+  position: relative;
+  flex-grow: 1;
+  block-size: 132px;
+  min-inline-size: 60px;
+  max-inline-size: 480px;
+  overflow: clip;
+  text-decoration: none;
+  background: var(--stage-edge);
+}
+
+.contact img {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+.contact .caption {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: 0;
+  padding-block: 14px 5px;
+  padding-inline: 8px;
+  overflow: clip;
+  background: linear-gradient(transparent, var(--caption-shade));
+  color: var(--caption-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.missing {
+  display: grid;
+  place-items: center;
+  block-size: 100%;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+/* ---------- dock under the stage ---------- */
+
+.dock {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px;
+  padding-block: 14px 16px;
+  padding-inline: 20px;
+  border-block-start: 1px solid var(--rule);
+  background: var(--stone);
+}
+
+.dock:empty {
+  display: none;
+}
+
+.about {
+  min-inline-size: 0;
+}
+
+.title {
+  margin-block-end: 6px;
+  font: 700 26px/1.1 var(--title-font);
+  font-stretch: 151%;
+  letter-spacing: -0.01em;
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  margin-block-end: 12px;
+  color: var(--text-dim);
+}
+
+.facts div {
+  display: flex;
+  gap: 6px;
+}
+
+.facts dd {
+  margin: 0;
+  color: var(--text);
 }
 
 .variants {
   display: flex;
-  flex-wrap: wrap;
   gap: 8px;
-  margin-top: 12px;
+  padding-block: 2px 4px;
+  padding-inline: 2px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
 }
 
-.variants a {
+.variant {
   display: grid;
+  flex: none;
   gap: 4px;
-  width: 120px;
-  color: inherit;
+  justify-items: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-dim);
+  text-align: start;
+  cursor: pointer;
+}
+
+.variant img,
+.variant .missing {
+  block-size: 52px;
+  min-inline-size: 52px;
+  outline: 1px solid var(--rule);
+}
+
+.variant .label {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  white-space: nowrap;
+}
+
+.variant[aria-pressed="true"] {
+  color: var(--text);
+}
+
+.variant[aria-pressed="true"] :is(img, .missing) {
+  outline: 2px solid var(--cursor);
+  outline-offset: 1px;
+}
+
+.actions {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-inline-size: 230px;
+}
+
+.actions a {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding-block: 7px;
+  padding-inline: 10px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  font-weight: 500;
   text-decoration: none;
 }
 
-.variants a.selected {
-  outline: 2px solid Highlight;
-  outline-offset: 2px;
+.actions a.primary {
+  border-color: var(--cursor);
+  background: var(--cursor);
+  color: var(--cursor-text);
+  font-weight: 700;
 }
 
-.variant-thumb {
-  width: 120px;
-  height: 80px;
-  object-fit: contain;
-  background: color-mix(in srgb, CanvasText 8%, Canvas);
+/* A filled button's ring takes the fill colour; the shared cursor-coloured ring would vanish against it. */
+.actions a.primary:focus-visible {
+  outline-color: var(--text);
 }
 
-.name {
-  overflow-wrap: anywhere;
+.actions a.primary kbd {
+  border-color: var(--cursor-text);
 }
 
-.badges,
-.tags {
+:is(.variant, .actions a, .contact a):active {
+  scale: 0.97;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .crumbs a:hover {
+    color: var(--text);
+  }
+
+  .actions a:hover {
+    background: var(--stone-raised);
+  }
+
+  .actions a.primary:hover {
+    background: var(--cursor-hover);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .row.category .thumb::before {
+    transition:
+      translate 120ms var(--ease-out),
+      rotate 120ms var(--ease-out);
+  }
+
+  :is(.variant, .actions a, .contact a) {
+    transition: scale 140ms var(--ease-out);
+  }
+}
+
+/* ---------- key legend ---------- */
+
+.legend {
+  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin: 0;
+  gap: 4px 18px;
+  padding-block: 7px;
+  padding-inline: 16px;
+  border-block-start: 1px solid var(--rule);
+  color: var(--text-dim);
+  font-size: 12px;
 }
 
-.badge,
-.tag {
-  padding: 1px 5px;
-  border: 1px solid GrayText;
-  border-radius: 3px;
-  font-size: 0.85em;
-}
+/* Narrow windows stack the list over the stage; the catalog is built for a desktop, this only keeps it usable. */
+@media (width < 800px) {
+  #app {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 40dvh minmax(0, 1fr);
+    block-size: auto;
+    min-block-size: 100dvh;
+  }
 
-.count,
-.notice {
-  color: GrayText;
+  .index {
+    border-inline-end: 0;
+    border-block-end: 1px solid var(--rule);
+  }
+
+  .stage {
+    grid-template-rows: 60dvh auto;
+  }
+
+  .dock {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .legend {
+    display: none;
+  }
 }
