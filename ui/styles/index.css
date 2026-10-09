@@ -1,6 +1,7 @@
 /*
  * Dense index: a keyboard-driven list on the left, the map on a neutral stage on the right.
  * Warm dark stone around the list; the stage is a hue-free mid grey so map colours read true.
+ * Extra-wide Roboto Flex titles over book-like old-style text; both cover Cyrillic.
  */
 :root {
   color-scheme: dark;
@@ -14,8 +15,8 @@
   --stage: #4b4945;
   --stage-edge: #3d3a36;
   --sheet-line: rgb(185 201 166 / 0.95);
-  --text-font: Inter, Roboto, "Helvetica Neue", "Arial Nova", "Nimbus Sans", Arial, sans-serif;
-  --title-font: Archivo, var(--text-font);
+  --text-font: "Iowan Old Style", "Palatino Linotype", "URW Palladio L", P052, serif;
+  --title-font: "Roboto Flex", "Helvetica Neue", Arial, sans-serif;
 }
 
 html,
@@ -26,7 +27,7 @@ body {
 body {
   background: var(--stone);
   color: var(--text);
-  font: 14px/1.4 var(--text-font);
+  font: 15px/1.45 var(--text-font);
   font-variant-numeric: tabular-nums lining-nums;
 }
 
@@ -343,8 +344,8 @@ kbd {
 
 .title {
   margin-bottom: 6px;
-  font: 800 26px/1.1 var(--title-font);
-  font-stretch: 112%;
+  font: 700 26px/1.1 var(--title-font);
+  font-stretch: 151%;
   letter-spacing: -0.01em;
 }
 
