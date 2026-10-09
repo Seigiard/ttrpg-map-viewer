@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { readFile, rm, stat } from "node:fs/promises";
+import { readFile, readdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import sharp from "sharp";
 import { readMapIndex, resolveOriginal } from "../../src/catalog/map-index.ts";
@@ -29,6 +29,28 @@ async function sha256(path: string): Promise<string> {
     .digest("hex");
 }
 
+async function snapshotTree(
+  root: string,
+  path = "",
+): Promise<readonly { readonly path: string; readonly size: number; readonly mtimeMs: number }[]> {
+  const absolute = join(root, path);
+  const entries = await readdir(absolute, { withFileTypes: true });
+
+  const files = await Promise.all(
+    entries.map(async (entry) => {
+      const child = path === "" ? entry.name : `${path}/${entry.name}`;
+
+      if (entry.isDirectory()) return snapshotTree(root, child);
+
+      const info = await stat(join(root, child));
+
+      return [{ path: child, size: info.size, mtimeMs: info.mtimeMs }];
+    }),
+  );
+
+  return files.flat().sort((a, b) => a.path.localeCompare(b.path));
+}
+
 describe("catalog indexes built by the shared engine", () => {
   test("the first full pass writes category, map and search indexes without touching the collection", async () => {
     // #given
@@ -36,10 +58,14 @@ describe("catalog indexes built by the shared engine", () => {
       ["Empty Day.jpg", "Original Night.jpg", "Rain.webm"].map((name) => stat(join(workspace.collection, PIT, name))),
     );
 
+    const collectionBefore = await snapshotTree(workspace.collection);
+
     // #when
     await withSession(workspace, async () => undefined);
 
     // #then
+    expect(await snapshotTree(workspace.collection)).toEqual(collectionBefore);
+
     expect(await readJson<CategoryIndex>(join(workspace.output, "index.json"))).toEqual({
       kind: "category",
       name: "",

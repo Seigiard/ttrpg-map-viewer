@@ -2,22 +2,17 @@ import { openLiveSynchronization, startLiveSynchronization, type LiveOptions, ty
 import { Effect } from "effect";
 import { log } from "../../logging/index.ts";
 import { classifyCollection, type CategoryNode, type FileListing, type FolderListing, type MapNode } from "../classify.ts";
-import { loadCoverOverrides, warnUnknownCoverOverrides } from "../cover.ts";
+import { loadCoverOverrides, selectMapCover, warnUnknownCoverOverrides } from "../cover.ts";
 import { mtimeOrNull, type FileSystemError } from "../file-system.ts";
 import { previewPath, thumbnailPath } from "../folder-index.ts";
-import { loadMetadataSources } from "../metadata.ts";
+import { enrichMap, loadMetadataSources, readVariantDimensions } from "../metadata.ts";
 import { INDEX_FILE } from "../model.ts";
 import { expectedOutputManifest, pruneOrphans } from "../output-manifest.ts";
-import type { DerivedImageKind } from "../thumbnail.ts";
+import type { DerivedImageFailure, DerivedImageKind } from "../thumbnail.ts";
 import { handleCatalogWork } from "./handlers.ts";
 import { createImageFailureRegistry, type ImageFailureRegistry } from "./image-status.ts";
 import { listingFromEntries } from "./listing.ts";
-import {
-  catalogStatePath,
-  includeObservableCollectionSource,
-  type SourceObservabilityOverride,
-  type UnobservableSourceKind,
-} from "./policy.ts";
+import { catalogStatePath, includeObservableCollectionSource, type UnobservableSourceKind } from "./policy.ts";
 import {
   CategoryWork,
   FinalizeIndexesWork,
@@ -38,7 +33,6 @@ export interface CatalogSynchronizationOptions {
   readonly imageFailures?: ImageFailureRegistry;
   readonly beforeImageWork?: (map: MapNode, variant: FileListing, kind: DerivedImageKind) => Effect.Effect<void>;
   readonly beforeMapIndexWrite?: (map: MapNode, present: ReadonlySet<string>) => Effect.Effect<void>;
-  readonly sourceObservability?: SourceObservabilityOverride;
   /** Zero disables the engine's periodic reconciliation. */
   readonly reconcileIntervalMs: number;
 }
@@ -96,7 +90,9 @@ function orderedVariants(map: MapNode): readonly FileListing[] {
  * The TTRPG declaration of a live session. The engine owns scanning, scheduling, reconciliation and shutdown;
  * this module only gives the observed source its meaning and says what each index depends on.
  */
-function catalogLiveOptions(options: CatalogSynchronizationOptions): LiveOptions<CatalogWork, FileSystemError, never> {
+function catalogLiveOptions(
+  options: CatalogSynchronizationOptions,
+): LiveOptions<CatalogWork, FileSystemError | DerivedImageFailure, never> {
   const imageFailures = options.imageFailures ?? createImageFailureRegistry();
   const unobservableSources = new Map<string, UnobservableSourceKind>();
 
@@ -105,12 +101,7 @@ function catalogLiveOptions(options: CatalogSynchronizationOptions): LiveOptions
     outputPath: options.dataPath,
     statePath: catalogStatePath(options.dataPath),
     includeSource: (path) =>
-      includeObservableCollectionSource(
-        options.filesPath,
-        path,
-        (unobservable, kind) => unobservableSources.set(unobservable, kind),
-        options.sourceObservability,
-      ),
+      includeObservableCollectionSource(options.filesPath, path, (unobservable, kind) => unobservableSources.set(unobservable, kind)),
     reconcileIntervalMs: options.reconcileIntervalMs,
     handle: handleCatalogWork,
     concurrency: options.thumbnailConcurrency,
@@ -126,7 +117,12 @@ function catalogLiveOptions(options: CatalogSynchronizationOptions): LiveOptions
           sourcePaths: [variantSourcePath(work.map, work.variant)],
           resultKind: "ttrpg-derived-image",
           processingVersion: "2",
-          outputPaths: [previewPath(work.map.path, work.variant.name), thumbnailPath(work.map.path, work.variant.name)],
+          outputPaths: [
+            previewPath(work.map.path, work.variant.name),
+            `${previewPath(work.map.path, work.variant.name)}.source.json`,
+            thumbnailPath(work.map.path, work.variant.name),
+            `${thumbnailPath(work.map.path, work.variant.name)}.source.json`,
+          ],
         };
       },
     },
@@ -161,6 +157,8 @@ function catalogLiveOptions(options: CatalogSynchronizationOptions): LiveOptions
         const overrides = yield* loadCoverOverrides(options.overridesPath);
         warnUnknownCoverOverrides(maps, overrides);
         const metadata = yield* loadMetadataSources(listing, options.filesPath);
+        const dimensions = yield* readVariantDimensions(maps, options.filesPath);
+        const passMaps = yield* Effect.forEach(maps, (map) => enrichMap(selectMapCover(map, overrides, dimensions), metadata, dimensions));
 
         const pass: PassContext = {
           filesPath: options.filesPath,
@@ -168,19 +166,20 @@ function catalogLiveOptions(options: CatalogSynchronizationOptions): LiveOptions
           listing,
           overrides,
           metadata,
+          dimensions,
           imageFailures,
           force: request.force,
           beforeImageWork: options.beforeImageWork,
           beforeMapIndexWrite: options.beforeMapIndexWrite,
           categories: new Map(allCategories.map((category) => [category.path, category])),
-          maps,
+          maps: passMaps,
           skippedDirectories,
-          initialMapWritesRemaining: { count: maps.length },
+          initialMapWritesRemaining: { count: passMaps.length },
           failedInitialMaps: new Set(),
         };
 
         const declaredImageKeys = new Set(
-          maps.flatMap((map) =>
+          passMaps.flatMap((map) =>
             map.variants.flatMap((variant) => [
               imageWorkKey(map.path, variant.name, "preview"),
               imageWorkKey(map.path, variant.name, "thumbnail"),
@@ -193,12 +192,17 @@ function catalogLiveOptions(options: CatalogSynchronizationOptions): LiveOptions
         return {
           minimum: [new CategoryWork({ category: root, pass })],
           work:
-            maps.length === 0
+            passMaps.length === 0
               ? [...categories.map((category) => new CategoryWork({ category, pass })), new SearchWork({ pass })]
               : [
-                  ...maps.map((map) => new MapWork({ map, pass, cascadeIndexes: false, initial: true })),
+                  ...passMaps.map((map) => new MapWork({ map, pass })),
                   new FinalizeIndexesWork({ pass }),
-                  ...maps.flatMap((map) => orderedVariants(map).map((variant) => new ImageWork({ map, variant, remaining: [], pass }))),
+                  ...passMaps.map((map) => new ImageWork({ map, variant: map.cover, pass })),
+                  ...passMaps.flatMap((map) =>
+                    orderedVariants(map)
+                      .filter((variant) => variant !== map.cover)
+                      .map((variant) => new ImageWork({ map, variant, pass })),
+                  ),
                 ],
           publish: expectedOutputManifest(categories, maps, options.dataPath, options.overridesPath, preservePrefixes).pipe(
             Effect.andThen((manifest) => pruneOrphans(options.dataPath, manifest, startedAt)),

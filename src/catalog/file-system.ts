@@ -4,6 +4,8 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/p
 import { dirname } from "node:path";
 import { ownedPromise } from "../utils/owned-promise.ts";
 
+let temporaryFileCounter = 0;
+
 interface FailureProps {
   readonly operation: string;
   readonly path: string;
@@ -62,7 +64,7 @@ export function ensureParentDirectory(path: string): Effect.Effect<void, FileSys
 
 /** Writes through a temp file and rename, so nginx never serves a half-written file. */
 export function writeFileAtomically(path: string, content: string): Effect.Effect<void, FileSystemError> {
-  const temporary = `${path}.tmp`;
+  const temporary = `${path}.${process.pid}.${temporaryFileCounter++}.tmp`;
 
   return ensureParentDirectory(path).pipe(
     Effect.andThen(() =>

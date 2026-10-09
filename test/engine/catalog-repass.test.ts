@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { acquireOutputTree } from "@seigiard/sync-engine";
 import { Deferred, Effect, Exit } from "effect";
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { openCatalogSynchronization, startCatalogSynchronization } from "../../src/catalog/engine/composition.ts";
+import { includeObservableCollectionSource } from "../../src/catalog/engine/policy.ts";
 import { startEngineRuntime } from "../../src/catalog/engine/runtime.ts";
 import type { CategoryIndex, MapIndex, SearchIndex } from "../../src/catalog/model.ts";
 import { ownedPromise } from "../../src/utils/owned-promise.ts";
@@ -88,10 +89,7 @@ describe("a later pass in the same engine session", () => {
     );
   }, 15_000);
 
-  test("publishes one map's derived references while a later map preview is still held", async () => {
-    await image(join(workspace.collection, "AAA First", "First.png"), 40, 40, "png");
-    await image(join(workspace.collection, "ZZZ Held", "Held.png"), 40, 40, "png");
-
+  test("a warm pass publishes one map's derived references and search thumbnail while a later map preview is still held", async () => {
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
@@ -107,6 +105,16 @@ describe("a later pass in the same engine session", () => {
                 : Effect.void,
           });
 
+          yield* session.awaitCompletion;
+          yield* ownedPromise(
+            () => image(join(workspace.collection, "AAA First", "First.png"), 40, 40, "png"),
+            (cause) => new Error(String(cause)),
+          );
+          yield* ownedPromise(
+            () => image(join(workspace.collection, "ZZZ Held", "Held.png"), 40, 40, "png"),
+            (cause) => new Error(String(cause)),
+          );
+          yield* session.notify(["AAA First/First.png", "ZZZ Held/Held.png"]);
           yield* Deferred.await(entered);
 
           // #when
@@ -136,6 +144,19 @@ describe("a later pass in the same engine session", () => {
           );
 
           expect(held.variants[0]?.preview).toBeNull();
+
+          const root = yield* ownedPromise(
+            () => readJson<CategoryIndex>(join(workspace.output, "index.json")),
+            (cause) => new Error(String(cause)),
+          );
+
+          const search = yield* ownedPromise(
+            () => readJson<SearchIndex>(join(workspace.output, "search.json")),
+            (cause) => new Error(String(cause)),
+          );
+
+          expect(root.maps.find((map) => map.path === "AAA First")?.cover.thumbnail).toBe("AAA First/_thumbnails/First.png.webp");
+          expect(search.maps.find((map) => map.path === "AAA First")?.thumbnail).toBe("AAA First/_thumbnails/First.png.webp");
           yield* Deferred.succeed(release, undefined);
           yield* session.awaitCompletion;
         }),
@@ -543,74 +564,60 @@ describe("failures", () => {
   });
 
   test("an unreadable subfolder keeps its parent category, loose map and prior child output", async () => {
-    const unobservable = new Set<string>();
+    if (process.getuid?.() === 0) return;
 
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          // #given
-          const session = yield* startCatalogSynchronization({
-            ...sessionOptions(workspace),
-            sourceObservability: (path) => (unobservable.has(path) ? "directory" : undefined),
-          });
+    await withSession(workspace, async (session) => {
+      // #given
+      const innerBefore = await readFile(join(workspace.output, "Mixed", "Inner", "index.json"), "utf8");
+      const looseBefore = await readFile(join(workspace.output, "Mixed", "._loose", "index.json"), "utf8");
+      const unreadable = join(workspace.collection, "Mixed", "Inner");
 
-          yield* session.awaitCompletion;
+      try {
+        await chmod(unreadable, 0o000);
 
-          const innerBefore = yield* ownedPromise(
-            () => readFile(join(workspace.output, "Mixed", "Inner", "index.json"), "utf8"),
-            (cause) => new Error(String(cause)),
-          );
+        // #when
+        await passOf(session);
 
-          const looseBefore = yield* ownedPromise(
-            () => readFile(join(workspace.output, "Mixed", "._loose", "index.json"), "utf8"),
-            (cause) => new Error(String(cause)),
-          );
+        // #then
+        expect(await readFile(join(workspace.output, "Mixed", "Inner", "index.json"), "utf8")).toBe(innerBefore);
+        expect(await readFile(join(workspace.output, "Mixed", "._loose", "index.json"), "utf8")).toBe(looseBefore);
+        expect((await Effect.runPromise(session.status)).failure).toBeNull();
+      } finally {
+        await chmod(unreadable, 0o755).catch(() => undefined);
+      }
+    });
 
-          unobservable.add("Mixed/Inner");
-
-          // #when
-          yield* session.requestPass({ force: false });
-          yield* session.awaitCompletion;
-
-          // #then
-          expect(
-            yield* ownedPromise(
-              () => readFile(join(workspace.output, "Mixed", "Inner", "index.json"), "utf8"),
-              (cause) => new Error(String(cause)),
-            ),
-          ).toBe(innerBefore);
-          expect(
-            yield* ownedPromise(
-              () => readFile(join(workspace.output, "Mixed", "._loose", "index.json"), "utf8"),
-              (cause) => new Error(String(cause)),
-            ),
-          ).toBe(looseBefore);
-          expect((yield* session.status).failure).toBeNull();
-        }),
-      ),
+    expect((await readJson<CategoryIndex>(join(workspace.output, "Mixed", "index.json"))).maps.map((map) => map.path)).toContain(
+      "Mixed/Inner",
     );
-
-    expect((await readJson<CategoryIndex>(join(workspace.output, "Mixed", "index.json"))).kind).toBe("category");
+    expect(await searchPaths()).toContain("Mixed/Inner");
     expect(await exists(join(workspace.output, "Mixed", "._loose", "_thumbnails", "Loose.png.webp"))).toBe(true);
   });
 
-  test("an unreadable image keeps its map and prior derived output", async () => {
-    const unobservable = new Set<string>();
+  test("a broken symlink under a map is not preserved as an unreadable directory", async () => {
+    // #given
+    await symlink("missing.png", join(workspace.collection, "Mixed", "Inner", "Broken.png"));
+    const unobservable: string[] = [];
 
+    // #when
+    const included = includeObservableCollectionSource(workspace.collection, "Mixed/Inner/Broken.png", (path) => unobservable.push(path));
+
+    // #then
+    expect(included).toBe(true);
+    expect(unobservable).toEqual([]);
+  });
+
+  test("an unreadable image keeps its map and prior derived output", async () => {
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
           // #given
-          const session = yield* startCatalogSynchronization({
-            ...sessionOptions(workspace),
-            sourceObservability: (path) => (unobservable.has(path) ? "file" : undefined),
-          });
+          const session = yield* startCatalogSynchronization(sessionOptions(workspace));
 
           yield* session.awaitCompletion;
           const preview = join(workspace.output, "Mixed", "Inner", "_previews", "Room.jpg.webp");
           const thumbnail = join(workspace.output, "Mixed", "Inner", "_thumbnails", "Room.jpg.webp");
 
-          unobservable.add("Mixed/Inner/Room.jpg");
           yield* ownedPromise(
             () => writeFile(join(workspace.collection, "Mixed", "Inner", "Room.jpg"), "not an image"),
             (cause) => new Error(String(cause)),
@@ -640,6 +647,23 @@ describe("failures", () => {
     expect(
       (await readJson<MapIndex>(join(workspace.output, "Mixed", "Inner", "index.json"))).variants.map((variant) => variant.file),
     ).toEqual(["Room.jpg"]);
+  });
+
+  test("a failed image re-render is retried after restart instead of being committed fresh", async () => {
+    // #given
+    await withSession(workspace, async () => undefined);
+    await writeFile(join(workspace.collection, "Mixed", "Inner", "Room.jpg"), "not an image");
+    await withSession(workspace, async (session) => {
+      await passOf(session);
+    });
+
+    // #when
+    await withSession(workspace, async () => undefined);
+
+    // #then
+    const index = await readJson<MapIndex>(join(workspace.output, "Mixed", "Inner", "index.json"));
+    expect(index.variants[0]?.preview).toBeNull();
+    expect(index.variants[0]?.thumbnail).toBeNull();
   });
 
   test("a derived image failure stays visible while unrelated images publish", async () => {

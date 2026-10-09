@@ -1,7 +1,7 @@
 import { Data, Effect, Match } from "effect";
 import type { CategoryNode, FileListing, FolderListing, MapNode } from "../classify.ts";
 import type { CoverOverrides } from "../cover.ts";
-import type { MetadataSources } from "../metadata.ts";
+import type { MetadataSources, VariantDimensions } from "../metadata.ts";
 import type { CatalogPath } from "../model.ts";
 import type { DerivedImageKind } from "../thumbnail.ts";
 import type { ImageFailureRegistry } from "./image-status.ts";
@@ -13,6 +13,7 @@ export interface PassContext {
   readonly listing: FolderListing;
   readonly overrides: CoverOverrides;
   readonly metadata: MetadataSources;
+  readonly dimensions: VariantDimensions;
   readonly imageFailures: ImageFailureRegistry;
   readonly force: boolean;
   readonly beforeImageWork?: (map: MapNode, variant: FileListing, kind: DerivedImageKind) => Effect.Effect<void>;
@@ -27,8 +28,6 @@ export interface PassContext {
 export class MapWork extends Data.TaggedClass("MapWork")<{
   readonly map: MapNode;
   readonly pass: PassContext;
-  readonly cascadeIndexes: boolean;
-  readonly initial: boolean;
 }> {}
 
 export class CategoryWork extends Data.TaggedClass("CategoryWork")<{ readonly category: CategoryNode; readonly pass: PassContext }> {}
@@ -40,7 +39,6 @@ export class FinalizeIndexesWork extends Data.TaggedClass("FinalizeIndexesWork")
 export class ImageWork extends Data.TaggedClass("ImageWork")<{
   readonly map: MapNode;
   readonly variant: FileListing;
-  readonly remaining: readonly FileListing[];
   readonly pass: PassContext;
 }> {}
 
