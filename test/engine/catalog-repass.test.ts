@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { acquireOutputTree } from "@seigiard/sync-engine";
 import { Deferred, Effect, Exit } from "effect";
 import { lstatSync, readdirSync } from "node:fs";
+import type { Stats } from "node:fs";
 import { mkdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { openCatalogSynchronization, startCatalogSynchronization } from "../../src/catalog/engine/composition.ts";
@@ -74,6 +75,171 @@ async function waitForRuntimeError(runtime: ReturnType<typeof startEngineRuntime
 }
 
 const searchPaths = async () => (await readJson<SearchIndex>(join(workspace.output, "search.json"))).maps.map((map) => map.path);
+
+function statLike(isDirectory: boolean): Stats {
+  // SAFETY: the policy tests only call `isDirectory`; every other Stats field is irrelevant to this boundary.
+  return { isDirectory: () => isDirectory } as Stats;
+}
+
+function errorWithCode(code: string, message = code): NodeJS.ErrnoException {
+  // SAFETY: this builds the Node fs error shape consumed by the source policy.
+  const error = new Error(message) as NodeJS.ErrnoException;
+
+  error.code = code;
+
+  return error;
+}
+
+describe("source policy decision table", () => {
+  test("hidden entries are excluded without touching the filesystem", () => {
+    // #given
+    const touched: string[] = [];
+
+    // #when
+    const included = includeObservableCollectionSource("/collection", ".sync-engine", undefined, {
+      lstatSync: (path) => {
+        touched.push(path);
+
+        return statLike(false);
+      },
+      readdirSync: (path) => {
+        touched.push(path);
+      },
+    });
+
+    // #then
+    expect({ included, touched }).toEqual({ included: false, touched: [] });
+  });
+
+  test("an observed file is included", () => {
+    // #given
+    const unobservable: unknown[] = [];
+
+    // #when
+    const included = includeObservableCollectionSource("/collection", "Map/Room.jpg", (path, source) => unobservable.push([path, source]), {
+      lstatSync: () => statLike(false),
+      readdirSync: () => undefined,
+    });
+
+    // #then
+    expect({ included, unobservable }).toEqual({ included: true, unobservable: [] });
+  });
+
+  test("an observed readable directory is included", () => {
+    // #given
+    const visited: string[] = [];
+
+    // #when
+    const included = includeObservableCollectionSource("/collection", "Map", undefined, {
+      lstatSync: () => statLike(true),
+      readdirSync: (path) => {
+        visited.push(path);
+      },
+    });
+
+    // #then
+    expect({ included, visited }).toEqual({ included: true, visited: ["/collection/Map"] });
+  });
+
+  test("an observed unreadable directory is excluded and recorded as a directory", () => {
+    // #given
+    const unobservable: unknown[] = [];
+
+    // #when
+    const included = includeObservableCollectionSource("/collection", "Map", (path, source) => unobservable.push([path, source]), {
+      lstatSync: () => statLike(true),
+      readdirSync: () => {
+        throw errorWithCode("EACCES", "readdir denied");
+      },
+    });
+
+    // #then
+    expect({ included, unobservable }).toEqual({
+      included: false,
+      unobservable: [["Map", { kind: "directory", message: "readdir denied" }]],
+    });
+  });
+
+  test("a transient file lstat failure is included when retry observes a file", () => {
+    // #given
+    let attempts = 0;
+    const unobservable: unknown[] = [];
+
+    // #when
+    const included = includeObservableCollectionSource("/collection", "Map/Room.jpg", (path, source) => unobservable.push([path, source]), {
+      lstatSync: () => {
+        attempts += 1;
+
+        if (attempts === 1) throw errorWithCode("ESTALE", "stale first read");
+
+        return statLike(false);
+      },
+      readdirSync: () => undefined,
+    });
+
+    // #then
+    expect({ included, unobservable }).toEqual({ included: true, unobservable: [] });
+  });
+
+  test("a transient directory lstat failure is excluded and records the directory when retry observes a directory", () => {
+    // #given
+    let attempts = 0;
+    const unobservable: unknown[] = [];
+
+    // #when
+    const included = includeObservableCollectionSource("/collection", "Map", (path, source) => unobservable.push([path, source]), {
+      lstatSync: () => {
+        attempts += 1;
+
+        if (attempts === 1) throw errorWithCode("ESTALE", "stale first read");
+
+        return statLike(true);
+      },
+      readdirSync: () => undefined,
+    });
+
+    // #then
+    expect({ included, unobservable }).toEqual({
+      included: false,
+      unobservable: [["Map", { kind: "directory", message: "stale first read" }]],
+    });
+  });
+
+  test("a confirmed absent entry is excluded without an unobservable record", () => {
+    // #given
+    const unobservable: unknown[] = [];
+
+    // #when
+    const included = includeObservableCollectionSource("/collection", "Missing", (path, source) => unobservable.push([path, source]), {
+      lstatSync: () => {
+        throw errorWithCode("ENOENT", "not found");
+      },
+      readdirSync: () => undefined,
+    });
+
+    // #then
+    expect({ included, unobservable }).toEqual({ included: false, unobservable: [] });
+  });
+
+  test("a persistent file lstat failure is excluded and recorded as a file", () => {
+    // #given
+    const unobservable: unknown[] = [];
+
+    // #when
+    const included = includeObservableCollectionSource("/collection", "Map/Room.jpg", (path, source) => unobservable.push([path, source]), {
+      lstatSync: () => {
+        throw errorWithCode("EIO", "disk busy");
+      },
+      readdirSync: () => undefined,
+    });
+
+    // #then
+    expect({ included, unobservable }).toEqual({
+      included: false,
+      unobservable: [["Map/Room.jpg", { kind: "file", message: "disk busy" }]],
+    });
+  });
+});
 
 describe("a later pass in the same engine session", () => {
   test("publishes category and search indexes before held preview work finishes", async () => {
@@ -746,6 +912,45 @@ describe("failures", () => {
     }
   });
 
+  test("a persistent variant-file lstat failure fails the pass instead of turning the file into a skipped directory", async () => {
+    let roomUnobservable = false;
+
+    await withSession(workspace, async () => undefined);
+    const mapBefore = await readFile(join(workspace.output, "Mixed", "Inner", "index.json"), "utf8");
+
+    const runtime = startEngineRuntime({
+      ...sessionOptions(workspace),
+      sourcePolicyFileSystem: {
+        lstatSync: (path) => {
+          if (roomUnobservable && path === join(workspace.collection, "Mixed", "Inner", "Room.jpg")) {
+            const error = new Error("simulated variant EIO");
+
+            Object.assign(error, { code: "EIO" });
+            throw error;
+          }
+
+          return lstatSync(path);
+        },
+        readdirSync,
+      },
+    });
+
+    try {
+      await runtime.ready;
+      roomUnobservable = true;
+
+      await runtime.requestPass();
+      await waitForRuntimeError(runtime, "simulated variant EIO");
+
+      expect(await readFile(join(workspace.output, "Mixed", "Inner", "index.json"), "utf8")).toBe(mapBefore);
+      expect(await exists(join(workspace.output, "Mixed", "Inner", "_previews", "Room.jpg.webp"))).toBe(true);
+      expect(await exists(join(workspace.output, "Mixed", "Inner", "_thumbnails", "Room.jpg.webp"))).toBe(true);
+      expect(await searchPaths()).toContain("Mixed/Inner");
+    } finally {
+      await runtime.stop();
+    }
+  });
+
   test("a readable-again skipped directory rewrites its category once and does not duplicate search entries", async () => {
     let innerUnreadable = false;
 
@@ -782,23 +987,62 @@ describe("failures", () => {
     }
   });
 
-  test("a stale recorded skipped directory is ignored when the current pass observes it as readable", async () => {
+  test("a stale recorded skipped directory is dropped when the current pass confirms it absent", async () => {
+    let innerUnreadable = false;
+
     const runtime = startEngineRuntime({
       ...sessionOptions(workspace),
-      sourcePolicyInitialUnobservable: new Map([["Mixed/Inner", { kind: "directory", message: "stale post-publish skip" }]]),
+      sourcePolicyFileSystem: {
+        lstatSync,
+        readdirSync: (path) => {
+          if (innerUnreadable && path === join(workspace.collection, "Mixed", "Inner")) throw new Error("simulated unreadable directory");
+
+          return readdirSync(path);
+        },
+      },
     });
 
     try {
       await runtime.ready;
-      await waitForRuntimeRecovery(runtime, "stale recorded skipped directory");
+      innerUnreadable = true;
+      await runtime.requestPass();
+      await waitForRuntimeError(runtime, "source:Mixed/Inner");
 
-      const mixed = await readJson<CategoryIndex>(join(workspace.output, "Mixed", "index.json"));
-      expect(mixed.maps.map((map) => map.path)).toContain("Mixed/Inner");
-      expect((await searchPaths()).filter((path) => path === "Mixed/Inner")).toHaveLength(1);
-      expect((await runtime.status()).errors).toEqual([]);
+      innerUnreadable = false;
+      await rm(join(workspace.collection, "Mixed", "Inner"), { recursive: true, force: true });
+
+      await runtime.requestPass();
+      await waitForRuntimeRecovery(runtime, "deleted skipped directory");
+
+      expect(await exists(join(workspace.output, "Mixed", "Inner", "index.json"))).toBe(false);
+      expect(await searchPaths()).not.toContain("Mixed/Inner");
     } finally {
       await runtime.stop();
     }
+  });
+
+  test("source policy keeps a file when retry lstat succeeds after a transient failure", async () => {
+    let attempts = 0;
+    const unobservable: string[] = [];
+
+    const included = includeObservableCollectionSource(workspace.collection, "Mixed/Inner/Room.jpg", (path) => unobservable.push(path), {
+      lstatSync: (path) => {
+        attempts += 1;
+
+        if (attempts === 1) {
+          const error = new Error("transient ESTALE");
+
+          Object.assign(error, { code: "ESTALE" });
+          throw error;
+        }
+
+        return lstatSync(path);
+      },
+      readdirSync,
+    });
+
+    expect(included).toBe(true);
+    expect(unobservable).toEqual([]);
   });
 
   test("a broken symlink under a map is not preserved as an unreadable directory", async () => {
@@ -916,7 +1160,41 @@ describe("failures", () => {
     ).toBeNull();
 
     // #when
-    await withSession(workspace, async () => undefined);
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const entered = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+          let previewAttempts = 0;
+
+          const session = yield* startCatalogSynchronization({
+            ...sessionOptions(workspace),
+            beforeImageWork: (map, variant, kind) => {
+              if (map.path !== "Solo" || variant.name !== "Room.jpg" || kind !== "preview") return Effect.void;
+
+              previewAttempts += 1;
+
+              return Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)));
+            },
+          });
+
+          yield* Deferred.await(entered);
+
+          const heldIndex = yield* ownedPromise(
+            () => readJson<MapIndex>(join(workspace.output, "Solo", "index.json")),
+            (cause) => new Error(String(cause)),
+          );
+
+          expect(heldIndex.variants[0]?.preview).toBeNull();
+          expect(heldIndex.variants[0]?.thumbnail).toBeNull();
+
+          yield* Deferred.succeed(release, undefined);
+          yield* session.awaitCompletion;
+
+          expect(previewAttempts).toBe(1);
+        }),
+      ),
+    );
 
     // #then
     const index = await readJson<MapIndex>(join(workspace.output, "Solo", "index.json"));

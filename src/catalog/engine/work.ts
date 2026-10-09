@@ -16,6 +16,7 @@ export interface PassContext {
   readonly beforeMapIndexWrite?: (map: MapNode, present: ReadonlySet<string>) => Effect.Effect<void>;
   readonly categories: ReadonlyMap<CatalogPath, CategoryNode>;
   readonly maps: readonly MapNode[];
+  readonly preservedPrefixes: ReadonlySet<CatalogPath>;
   readonly skippedDirectories: ReadonlySet<CatalogPath>;
   readonly mapIndexLocks: Map<CatalogPath, Semaphore.Semaphore>;
   readonly refreshLocks: Map<CatalogPath, Semaphore.Semaphore>;
@@ -46,7 +47,7 @@ export function imageWorkKey(mapPath: CatalogPath, variantName: string, kind: De
   return JSON.stringify(["image", mapPath, variantName, kind]);
 }
 
-/** Equal pending keys combine; keys also identify freshness records and retained work failures. */
+/** Equal pending keys combine; keys also identify retained work failures. */
 export function workKey(work: CatalogWork): string {
   return Match.value(work).pipe(
     Match.tagsExhaustive({

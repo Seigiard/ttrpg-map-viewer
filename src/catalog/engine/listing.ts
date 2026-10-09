@@ -2,13 +2,13 @@ import type { SourceEntry } from "@seigiard/sync-engine";
 import type { FileListing, FolderListing } from "../classify.ts";
 import type { CatalogPath } from "../model.ts";
 
-function parentOf(path: CatalogPath): CatalogPath {
+export function parentOf(path: CatalogPath): CatalogPath {
   const slash = path.lastIndexOf("/");
 
   return slash === -1 ? "" : path.slice(0, slash);
 }
 
-function nameOf(path: CatalogPath): string {
+export function nameOf(path: CatalogPath): string {
   return path.slice(path.lastIndexOf("/") + 1);
 }
 

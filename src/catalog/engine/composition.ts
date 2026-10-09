@@ -1,7 +1,7 @@
 import { openLiveSynchronization, startLiveSynchronization, type LiveOptions, type SourceEntry } from "@seigiard/sync-engine";
 import { Effect } from "effect";
 import { log } from "../../logging/index.ts";
-import { classifyCollection, type CategoryNode, type FileListing, type FolderListing, type MapNode } from "../classify.ts";
+import { classifyCollection, compareNames, type CategoryNode, type FileListing, type FolderListing, type MapNode } from "../classify.ts";
 import { loadCoverOverrides, selectMapCover, warnUnknownCoverOverrides } from "../cover.ts";
 import { mtimeOrNull, type FileSystemError } from "../file-system.ts";
 import { previewPath, thumbnailPath } from "../folder-index.ts";
@@ -11,8 +11,15 @@ import { expectedOutputManifest, pruneOrphans } from "../output-manifest.ts";
 import type { DerivedImageFailure, DerivedImageKind } from "../thumbnail.ts";
 import { handleCatalogWork } from "./handlers.ts";
 import { createImageFailureRegistry, type ImageFailureRegistry } from "./image-status.ts";
-import { listingFromEntries } from "./listing.ts";
-import { catalogStatePath, includeObservableCollectionSource, type SourcePolicyFileSystem, type UnobservableSource } from "./policy.ts";
+import { listingFromEntries, nameOf, parentOf } from "./listing.ts";
+import {
+  catalogStatePath,
+  includeObservableCollectionSource,
+  isConfirmedAbsent,
+  nodeSourcePolicyFileSystem,
+  type SourcePolicyFileSystem,
+  type UnobservableSource,
+} from "./policy.ts";
 import { createSourceFailureRegistry, type SourceFailureRegistry } from "./source-status.ts";
 import {
   CategoryWork,
@@ -36,7 +43,6 @@ export interface CatalogSynchronizationOptions {
   readonly beforeImageWork?: (map: MapNode, variant: FileListing, kind: DerivedImageKind) => Effect.Effect<void>;
   readonly beforeMapIndexWrite?: (map: MapNode, present: ReadonlySet<string>) => Effect.Effect<void>;
   readonly sourcePolicyFileSystem?: SourcePolicyFileSystem;
-  readonly sourcePolicyInitialUnobservable?: ReadonlyMap<string, UnobservableSource>;
   /** Zero disables the engine's periodic reconciliation. */
   readonly reconcileIntervalMs: number;
 }
@@ -60,25 +66,42 @@ function collectNodes(root: CategoryNode): CatalogNodes {
   return { categories, maps };
 }
 
-function parentOf(path: CatalogPath): CatalogPath {
-  const slash = path.lastIndexOf("/");
-
-  return slash === -1 ? "" : path.slice(0, slash);
-}
-
-function nameOf(path: CatalogPath): string {
-  return path.slice(path.lastIndexOf("/") + 1);
-}
-
 function compareCatalogCards(
   a: { readonly name: string; readonly path: string },
   b: { readonly name: string; readonly path: string },
 ): number {
-  return a.name.localeCompare(b.name, "en", { numeric: true, sensitivity: "base" }) || a.path.localeCompare(b.path);
+  return compareNames(a.name, b.name) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+}
+
+function preservedPrefix(path: CatalogPath, source: UnobservableSource): CatalogPath {
+  return source.kind === "file" ? parentOf(path) : path;
+}
+
+function stillUnobservable(
+  filesPath: string,
+  path: CatalogPath,
+  source: UnobservableSource,
+  fileSystem: SourcePolicyFileSystem,
+): readonly (readonly [CatalogPath, UnobservableSource])[] {
+  try {
+    const info = fileSystem.lstatSync(`${filesPath}/${path}`);
+
+    if (source.kind === "directory" && info.isDirectory()) fileSystem.readdirSync(`${filesPath}/${path}`);
+
+    return [];
+  } catch (error) {
+    // SAFETY: Node fs throws Error-like values here; tests inject the same shape plus optional `code`.
+    const observedError = error as NodeJS.ErrnoException;
+
+    return isConfirmedAbsent(observedError) ? [] : [[path, source] as const];
+  }
 }
 
 function ensureSkippedAncestors(root: CategoryNode, skippedDirectories: ReadonlySet<CatalogPath>): CategoryNode {
+  if (skippedDirectories.size === 0) return root;
+
   const byPath = new Map<CatalogPath, CategoryNode>();
+  const childrenByParent = new Map<CatalogPath, CategoryNode[]>();
   const pending = [root];
 
   for (let category = pending.pop(); category; category = pending.pop()) {
@@ -93,14 +116,16 @@ function ensureSkippedAncestors(root: CategoryNode, skippedDirectories: Readonly
     }
   }
 
+  for (const category of byPath.values()) {
+    if (category.path === "" || skippedDirectories.has(category.path)) continue;
+
+    const siblings = childrenByParent.get(parentOf(category.path)) ?? [];
+    siblings.push(category);
+    childrenByParent.set(parentOf(category.path), siblings);
+  }
+
   function rebuild(category: CategoryNode): CategoryNode {
-    const children = [...byPath.values()]
-      .flatMap((candidate) =>
-        candidate.path !== "" && parentOf(candidate.path) === category.path && !skippedDirectories.has(candidate.path)
-          ? [rebuild(candidate)]
-          : [],
-      )
-      .sort(compareCatalogCards);
+    const children = (childrenByParent.get(category.path) ?? []).map(rebuild).sort(compareCatalogCards);
 
     return { ...category, categories: children };
   }
@@ -147,7 +172,7 @@ function catalogLiveOptions(
 ): LiveOptions<CatalogWork, FileSystemError | DerivedImageFailure, never> {
   const imageFailures = options.imageFailures ?? createImageFailureRegistry();
   const sourceFailures = options.sourceFailures ?? createSourceFailureRegistry();
-  const unobservableSources = new Map<string, UnobservableSource>(options.sourcePolicyInitialUnobservable);
+  const unobservableSources = new Map<string, UnobservableSource>();
 
   return {
     sourcePath: options.filesPath,
@@ -194,8 +219,15 @@ function catalogLiveOptions(
       Effect.gen(function* () {
         const startedAt = Date.now();
         const entryPaths = new Set(entries.map((entry) => entry.path));
-        const unobservable = new Map([...unobservableSources].filter(([path]) => !entryPaths.has(path)));
-        const preservePrefixes = [...unobservable.keys()];
+        const fileSystem = options.sourcePolicyFileSystem ?? nodeSourcePolicyFileSystem;
+
+        const unobservable = new Map(
+          [...unobservableSources].flatMap(([path, source]) =>
+            entryPaths.has(path) ? [] : stillUnobservable(options.filesPath, path, source, fileSystem),
+          ),
+        );
+
+        const preservePrefixes = new Set([...unobservable].map(([path, source]) => preservedPrefix(path, source)));
         const skippedDirectories = new Set([...unobservable].flatMap(([path, source]) => (source.kind === "directory" ? [path] : [])));
         unobservableSources.clear();
 
@@ -236,6 +268,7 @@ function catalogLiveOptions(
           beforeMapIndexWrite: options.beforeMapIndexWrite,
           categories: new Map(allCategories.map((category) => [category.path, category])),
           maps: passMaps,
+          preservedPrefixes: preservePrefixes,
           skippedDirectories,
           mapIndexLocks: new Map(),
           refreshLocks: new Map(),
@@ -269,7 +302,7 @@ function catalogLiveOptions(
                       .map((variant) => new ImageWork({ map, variant, pass })),
                   ),
                 ],
-          publish: expectedOutputManifest(categories, maps, options.dataPath, options.overridesPath, preservePrefixes).pipe(
+          publish: expectedOutputManifest(categories, maps, options.dataPath, options.overridesPath, [...preservePrefixes]).pipe(
             Effect.andThen((manifest) => pruneOrphans(options.dataPath, manifest, startedAt)),
             Effect.tap(() =>
               Effect.sync(() => log.info("Generate", "Generation finished", { categories: categories.length, maps: maps.length })),

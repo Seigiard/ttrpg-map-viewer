@@ -1,6 +1,6 @@
 import { Effect, Match, Semaphore } from "effect";
 import { join } from "node:path";
-import { isAnimatedVariant, type CategoryNode, type FileListing, type MapNode } from "../classify.ts";
+import { compareNames, isAnimatedVariant, type CategoryNode, type FileListing, type MapNode } from "../classify.ts";
 import {
   mtimeOrNull,
   readDirectory,
@@ -18,15 +18,10 @@ import {
   searchIndexFromPublished,
   thumbnailPath,
 } from "../folder-index.ts";
-import { type CatalogPath, type CategoryIndex, INDEX_FILE, type MapIndex, SEARCH_FILE } from "../model.ts";
+import { type CatalogPath, type CategoryIndex, INDEX_FILE, LOOSE_MAP_SEGMENT, type MapCard, type MapIndex, SEARCH_FILE } from "../model.ts";
 import { ensureDerivedImage, PREVIEW_MAX_SIZE, THUMBNAIL_MAX_SIZE, type DerivedImageFailure, type DerivedImageKind } from "../thumbnail.ts";
 import { type CatalogWork, FinalizeIndexesWork, ImageWork, imageWorkKey, MapWork, type PassContext } from "./work.ts";
-
-function parentOf(path: CatalogPath): CatalogPath {
-  const slash = path.lastIndexOf("/");
-
-  return slash === -1 ? "" : path.slice(0, slash);
-}
+import { parentOf } from "./listing.ts";
 
 function hasImageFailure(pass: PassContext, map: MapNode, variant: FileListing, kind: DerivedImageKind): boolean {
   const failures = new Set(pass.imageFailures.snapshot().map((failure) => failure.work));
@@ -93,6 +88,18 @@ function refreshCategory(category: CategoryNode, pass: PassContext): Effect.Effe
 
 function refreshSearch(pass: PassContext): Effect.Effect<readonly CatalogWork[], FileSystemError> {
   return Semaphore.withPermits(lockFor(pass.refreshLocks, "search"), 1, handleSearch(pass));
+}
+
+function compareCards(a: { readonly name: string; readonly path: string }, b: { readonly name: string; readonly path: string }): number {
+  return compareNames(a.name, b.name) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+}
+
+function sortMapCards(cards: readonly MapCard[]): readonly MapCard[] {
+  const [first, ...rest] = cards;
+
+  if (first?.path.endsWith(`/${LOOSE_MAP_SEGMENT}`)) return [first, ...rest.sort(compareCards)];
+
+  return [...cards].sort(compareCards);
 }
 
 function handleMap({ map, pass }: MapWork): Effect.Effect<readonly CatalogWork[], FileSystemError> {
@@ -275,8 +282,8 @@ function collectPublishedMaps(dataPath: string, path: CatalogPath): Effect.Effec
   });
 }
 
-function skippedPublishedMaps(pass: PassContext): Effect.Effect<readonly MapIndex[], FileSystemError> {
-  return Effect.forEach(pass.skippedDirectories, (path) => collectPublishedMaps(pass.dataPath, path), { concurrency: 16 }).pipe(
+function preservedPublishedMaps(pass: PassContext): Effect.Effect<readonly MapIndex[], FileSystemError> {
+  return Effect.forEach(pass.preservedPrefixes, (path) => collectPublishedMaps(pass.dataPath, path), { concurrency: 16 }).pipe(
     Effect.map((indexes) => indexes.flat()),
   );
 }
@@ -284,7 +291,7 @@ function skippedPublishedMaps(pass: PassContext): Effect.Effect<readonly MapInde
 function handleCategory(category: CategoryNode, pass: PassContext): Effect.Effect<readonly CatalogWork[], FileSystemError> {
   return Effect.gen(function* () {
     const published = yield* Effect.forEach(category.maps, (map) => readPublishedMap(pass.dataPath, map.path));
-    const preserved = (yield* skippedPublishedMaps(pass)).filter((index) => parentOf(index.path) === category.path);
+    const preserved = (yield* preservedPublishedMaps(pass)).filter((index) => parentOf(index.path) === category.path);
 
     const byPath = new Map(published.flatMap((index) => (index ? [[index.path, index] as const] : [])));
 
@@ -307,13 +314,8 @@ function handleCategory(category: CategoryNode, pass: PassContext): Effect.Effec
         categories: [
           ...index.categories,
           ...extraCategories.filter((extra) => !index.categories.some((card) => card.path === extra.path)),
-        ].sort((a, b) => a.name.localeCompare(b.name, "en", { numeric: true, sensitivity: "base" }) || a.path.localeCompare(b.path)),
-        maps: [
-          ...index.maps,
-          ...extraMaps.sort(
-            (a, b) => a.name.localeCompare(b.name, "en", { numeric: true, sensitivity: "base" }) || a.path.localeCompare(b.path),
-          ),
-        ],
+        ].sort(compareCards),
+        maps: sortMapCards([...index.maps, ...extraMaps]),
       }),
     );
 
@@ -324,7 +326,7 @@ function handleCategory(category: CategoryNode, pass: PassContext): Effect.Effec
 function handleSearch(pass: PassContext): Effect.Effect<readonly CatalogWork[], FileSystemError> {
   return Effect.gen(function* () {
     const published = yield* Effect.forEach(pass.maps, (map) => readPublishedMap(pass.dataPath, map.path), { concurrency: 16 });
-    const preserved = yield* skippedPublishedMaps(pass);
+    const preserved = yield* preservedPublishedMaps(pass);
 
     const byPath = new Map([...published.flatMap((index) => (index ? [index] : [])), ...preserved].map((index) => [index.path, index]));
 

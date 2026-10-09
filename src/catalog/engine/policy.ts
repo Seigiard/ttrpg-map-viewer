@@ -2,7 +2,7 @@ import { lstatSync, readdirSync, type Stats } from "node:fs";
 import { join } from "node:path";
 import { ENGINE_STATE_DIRECTORY } from "../output-manifest.ts";
 
-type UnobservableSourceKind = "directory";
+type UnobservableSourceKind = "directory" | "file";
 
 export interface UnobservableSource {
   readonly kind: UnobservableSourceKind;
@@ -14,7 +14,7 @@ export interface SourcePolicyFileSystem {
   readonly readdirSync: (path: string) => void;
 }
 
-const nodeSourcePolicyFileSystem: SourcePolicyFileSystem = { lstatSync, readdirSync };
+export const nodeSourcePolicyFileSystem: SourcePolicyFileSystem = { lstatSync, readdirSync };
 
 /** Hidden collection entries are never catalogued, so the engine state directory cannot collide with a source name. */
 function includeCollectionSource(path: string): boolean {
@@ -29,8 +29,18 @@ export function includeObservableCollectionSource(
 ): boolean {
   if (!includeCollectionSource(path)) return false;
 
+  return classifySourceObservation(sourcePath, path, onUnobservable, fileSystem);
+}
+
+function classifySourceObservation(
+  sourcePath: string,
+  path: string,
+  onUnobservable: ((path: string, source: UnobservableSource) => void) | undefined,
+  fileSystem: SourcePolicyFileSystem,
+): boolean {
+  const absolute = join(sourcePath, path);
+
   try {
-    const absolute = join(sourcePath, path);
     const info = fileSystem.lstatSync(absolute);
 
     if (info.isDirectory()) fileSystem.readdirSync(absolute);
@@ -41,21 +51,33 @@ export function includeObservableCollectionSource(
     const observedError = error as NodeJS.ErrnoException;
 
     try {
-      const absolute = join(sourcePath, path);
       const info = fileSystem.lstatSync(absolute);
 
       if (info.isDirectory()) onUnobservable?.(path, { kind: "directory", message: observedError.message });
+
+      return !info.isDirectory();
     } catch (retryError) {
       // SAFETY: Node fs throws Error-like values here; tests inject the same shape plus optional `code`.
       const observedRetryError = retryError as NodeJS.ErrnoException;
 
       if (isAbsent(observedRetryError)) return false;
 
-      onUnobservable?.(path, { kind: "directory", message: observedRetryError.message });
-    }
+      onUnobservable?.(path, { kind: unobservableKindForFailedRetry(path), message: observedRetryError.message });
 
-    return false;
+      return false;
+    }
   }
+}
+
+function unobservableKindForFailedRetry(path: string): UnobservableSourceKind {
+  const slash = path.lastIndexOf("/");
+  const name = slash === -1 ? path : path.slice(slash + 1);
+
+  return name.includes(".") ? "file" : "directory";
+}
+
+export function isConfirmedAbsent(error: NodeJS.ErrnoException): boolean {
+  return isAbsent(error);
 }
 
 function isAbsent(error: NodeJS.ErrnoException): boolean {
