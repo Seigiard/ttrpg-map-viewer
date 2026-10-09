@@ -1,171 +1,494 @@
-/* Deliberately plain: visual style is chosen later on real data. */
+/*
+ * Dense index: a keyboard-driven list on the left, the map on a neutral stage on the right.
+ * Warm dark stone around the list; the stage is a hue-free mid grey so map colours read true.
+ */
 :root {
-  color-scheme: light dark;
-  font-family: system-ui, sans-serif;
-  font-size: 14px;
+  color-scheme: dark;
+  --stone: #2c2824;
+  --stone-raised: #3a342e;
+  --rule: #463f38;
+  --text: #ede4d4;
+  --text-dim: #a3988a;
+  --cursor: #b9c9a6;
+  --cursor-text: #1f241a;
+  --stage: #4b4945;
+  --stage-edge: #3d3a36;
+  --sheet-line: rgb(185 201 166 / 0.95);
+  --text-font: Inter, Roboto, "Helvetica Neue", "Arial Nova", "Nimbus Sans", Arial, sans-serif;
+  --title-font: Archivo, var(--text-font);
+}
+
+html,
+body {
+  height: 100%;
 }
 
 body {
-  background: Canvas;
-  color: CanvasText;
+  background: var(--stone);
+  color: var(--text);
+  font: 14px/1.4 var(--text-font);
+  font-variant-numeric: tabular-nums lining-nums;
 }
 
-main {
-  padding: 12px 16px;
-}
-
-h1 {
-  font-size: 1.4rem;
-  margin-block: 4px 12px;
-}
-
-ul {
-  list-style: none;
-  padding: 0;
-}
-
-.breadcrumbs {
-  color: GrayText;
-}
-
-.header {
-  margin-bottom: 12px;
-}
-
-.search-input {
-  width: min(100%, 360px);
-}
-
-.search-results {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 8px;
-}
-
-.search-results a {
-  display: grid;
-  grid-template-columns: 64px 1fr;
-  gap: 2px 8px;
+a {
   color: inherit;
-  text-decoration: none;
 }
 
-.search-thumb {
-  grid-row: span 3;
-  width: 64px;
-  height: 64px;
-  object-fit: contain;
-  background: color-mix(in srgb, CanvasText 8%, Canvas);
+:focus-visible {
+  outline: 2px solid var(--cursor);
+  outline-offset: 2px;
 }
 
-.search-context {
-  color: GrayText;
-  overflow-wrap: anywhere;
+kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 1px 4px 2px;
+  border: 1px solid var(--rule);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  font: 500 11px/1.2 var(--text-font);
+  text-align: center;
 }
 
-.categories {
+#app {
+  display: grid;
+  grid-template-columns: minmax(320px, 440px) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100vh;
+}
+
+/* ---------- path bar ---------- */
+
+.pathbar {
+  grid-column: 1 / -1;
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.crumbs {
+  display: flex;
+  flex: 1;
   gap: 6px;
-  margin-bottom: 16px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-dim);
+  white-space: nowrap;
 }
 
-.categories a {
-  display: block;
-  padding: 4px 10px;
-  border: 1px solid GrayText;
-  border-radius: 4px;
+.crumbs a {
   text-decoration: none;
 }
 
-.maps {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 12px;
+.crumbs a:hover {
+  color: var(--text);
 }
 
-.maps a {
+.crumbs a:last-child {
+  color: var(--text);
+}
+
+.crumbs a + a::before {
+  content: "/";
+  margin-right: 6px;
+  color: var(--rule);
+}
+
+.filter {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
-  color: inherit;
-  text-decoration: none;
+  align-items: center;
+  gap: 8px;
+  width: min(360px, 45vw);
+  padding: 5px 8px;
+  border-radius: 4px;
+  background: var(--stone-raised);
 }
 
-.thumb {
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: contain;
-  background: color-mix(in srgb, CanvasText 8%, Canvas);
+.filter:focus-within {
+  box-shadow: 0 0 0 2px var(--cursor);
 }
 
-.thumb-missing {
+.filter input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+}
+
+.filter input::placeholder {
+  color: var(--text-dim);
+}
+
+.filter input:focus {
+  outline: none;
+}
+
+/* ---------- index list ---------- */
+
+.index {
+  overflow-y: auto;
+  padding: 6px 0;
+  border-right: 1px solid var(--rule);
+}
+
+/* The bright cursor bar is the focus indicator here; it dims when focus leaves the list. */
+.index:focus-visible {
+  outline: none;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto 24px;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 12px 0 calc(12px + var(--depth, 0) * 16px);
+  cursor: default;
+}
+
+.row .thumb {
   display: grid;
   place-items: center;
-  color: GrayText;
+  width: 44px;
+  height: 28px;
 }
 
-.preview {
-  display: block;
-  width: min(100%, 2048px);
-  max-height: 80vh;
+.row .thumb img {
+  max-width: 44px;
+  max-height: 28px;
+}
+
+.row .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row .context {
+  margin-left: 8px;
+  color: var(--text-dim);
+}
+
+.row .size,
+.row .count {
+  color: var(--text-dim);
+  text-align: right;
+}
+
+.row.category .name {
+  font-weight: 700;
+}
+
+.row.category .thumb::before {
+  content: "";
+  border: 5px solid transparent;
+  border-left: 7px solid var(--text-dim);
+  transform: translateX(3px);
+  transition: transform 120ms;
+}
+
+.row.category.open .thumb::before {
+  transform: translate(0, 3px) rotate(90deg);
+}
+
+.index:focus .row.cursor {
+  background: var(--cursor);
+  color: var(--cursor-text);
+}
+
+.index:focus .row.cursor :is(.size, .count, .context) {
+  color: var(--cursor-text);
+}
+
+.index:focus .row.cursor.category .thumb::before {
+  border-left-color: var(--cursor-text);
+}
+
+.index:not(:focus) .row.cursor {
+  background: var(--stone-raised);
+}
+
+.empty {
+  padding: 16px;
+  color: var(--text-dim);
+}
+
+/* ---------- stage ---------- */
+
+.stage {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+  background: var(--stage);
+}
+
+.viewport {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: 20px;
+  overflow: hidden;
+}
+
+.plate {
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px var(--stage-edge);
+}
+
+.plate :is(img, video) {
+  width: 100%;
+  height: 100%;
+  max-width: none;
   object-fit: contain;
-  background: color-mix(in srgb, CanvasText 8%, Canvas);
 }
 
-.actions {
+.sheets {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms;
+}
+
+.sheets.on {
+  opacity: 1;
+}
+
+.sheets i {
+  border: 1px dashed var(--sheet-line);
+}
+
+.notice {
+  color: var(--text-dim);
+}
+
+.contact {
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  align-self: start;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+}
+
+/* Soaks up the last row's free space, so its tiles keep their proportions instead of stretching. */
+.contact::after {
+  content: "";
+  flex-grow: 1000;
+}
+
+.contact a {
+  position: relative;
+  flex-grow: 1;
+  height: 132px;
+  min-width: 60px;
+  max-width: 480px;
+  overflow: hidden;
+  text-decoration: none;
+  background: var(--stage-edge);
+}
+
+.contact img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.contact .caption {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  padding: 14px 8px 5px;
+  overflow: hidden;
+  background: linear-gradient(transparent, rgb(0 0 0 / 0.75));
+  color: #f4f1ea;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.missing {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+/* ---------- dock under the stage ---------- */
+
+.dock {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px;
+  padding: 14px 20px 16px;
+  border-top: 1px solid var(--rule);
+  background: var(--stone);
+}
+
+.dock:empty {
+  display: none;
+}
+
+.about {
+  min-width: 0;
+}
+
+.title {
+  margin-bottom: 6px;
+  font: 800 26px/1.1 var(--title-font);
+  font-stretch: 112%;
+  letter-spacing: -0.01em;
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  margin-bottom: 12px;
+  color: var(--text-dim);
+}
+
+.facts div {
+  display: flex;
+  gap: 6px;
+}
+
+.facts dd {
+  margin: 0;
+  color: var(--text);
 }
 
 .variants {
   display: flex;
-  flex-wrap: wrap;
   gap: 8px;
-  margin-top: 12px;
+  padding: 2px 2px 4px;
+  overflow-x: auto;
 }
 
-.variants a {
+.variant {
   display: grid;
+  flex: none;
   gap: 4px;
-  width: 120px;
-  color: inherit;
+  justify-items: start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-dim);
+  text-align: left;
+  cursor: pointer;
+}
+
+.variant img,
+.variant .missing {
+  height: 52px;
+  min-width: 52px;
+  outline: 1px solid var(--rule);
+}
+
+.variant .label {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  white-space: nowrap;
+}
+
+.variant[aria-pressed="true"] {
+  color: var(--text);
+}
+
+.variant[aria-pressed="true"] :is(img, .missing) {
+  outline: 2px solid var(--cursor);
+  outline-offset: 1px;
+}
+
+.actions {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 230px;
+}
+
+.actions a {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 7px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  font-weight: 500;
   text-decoration: none;
 }
 
-.variants a.selected {
-  outline: 2px solid Highlight;
-  outline-offset: 2px;
+.actions a:hover {
+  background: var(--stone-raised);
 }
 
-.variant-thumb {
-  width: 120px;
-  height: 80px;
-  object-fit: contain;
-  background: color-mix(in srgb, CanvasText 8%, Canvas);
+.actions a.primary {
+  border-color: var(--cursor);
+  background: var(--cursor);
+  color: var(--cursor-text);
+  font-weight: 700;
 }
 
-.name {
-  overflow-wrap: anywhere;
+.actions a.primary:hover {
+  filter: brightness(1.06);
 }
 
-.badges,
-.tags {
+.actions a.primary kbd {
+  border-color: var(--cursor-text);
+}
+
+/* ---------- key legend ---------- */
+
+.legend {
+  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin: 0;
+  gap: 4px 18px;
+  padding: 7px 16px;
+  border-top: 1px solid var(--rule);
+  color: var(--text-dim);
+  font-size: 12px;
 }
 
-.badge,
-.tag {
-  padding: 1px 5px;
-  border: 1px solid GrayText;
-  border-radius: 3px;
-  font-size: 0.85em;
+/* Narrow windows stack the list over the stage; the catalog is built for a desktop, this only keeps it usable. */
+@media (width < 800px) {
+  #app {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 40vh minmax(0, 1fr);
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .index {
+    border-right: 0;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .stage {
+    grid-template-rows: 60vh auto;
+  }
+
+  .dock {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .legend {
+    display: none;
+  }
 }
 
-.count,
-.notice {
-  color: GrayText;
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+  }
 }
