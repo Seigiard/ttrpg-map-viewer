@@ -19,3 +19,5 @@ CI publishes `ghcr.io/seigiard/ttrpg-map-viewer` on every push to `main` (`lates
 ## Synchronization
 
 Startup, watcher-triggered regeneration, forced resync, reconciliation and shutdown run through `@seigiard/sync-engine`. The root `index.json` is the minimum availability marker. `GET /internal/status` is local-only and reports availability, verification, completion and retained pass/work errors for operators. If a source entry cannot be observed for a reason other than confirmed absence (`ENOENT` or `ENOTDIR`) during the opening scan of a pass, the pass fails before declaration and leaves prior catalog output untouched until the source is readable again. If a source becomes unobservable after publication, the pass reports the post-publication scan failure; already written output is not rolled back.
+
+Future engine updates should come from the npm registry: update `package.json` to the exact reviewed version, regenerate `bun.lock` with the Bun version pinned by CI, rebuild Docker images without cache, and verify the installed package version and registry integrity before merge.
