@@ -4,6 +4,13 @@ import { ENGINE_STATE_DIRECTORY } from "../output-manifest.ts";
 
 export type UnobservableSourceKind = "directory";
 
+export interface SourcePolicyFileSystem {
+  readonly lstatSync: typeof lstatSync;
+  readonly readdirSync: (path: string) => void;
+}
+
+const nodeSourcePolicyFileSystem: SourcePolicyFileSystem = { lstatSync, readdirSync };
+
 /** Hidden collection entries are never catalogued, so the engine state directory cannot collide with a source name. */
 function includeCollectionSource(path: string): boolean {
   return !path.split("/").some((name) => name.startsWith("."));
@@ -13,20 +20,21 @@ export function includeObservableCollectionSource(
   sourcePath: string,
   path: string,
   onUnobservable?: (path: string, kind: UnobservableSourceKind) => void,
+  fileSystem: SourcePolicyFileSystem = nodeSourcePolicyFileSystem,
 ): boolean {
   if (!includeCollectionSource(path)) return false;
 
   try {
     const absolute = join(sourcePath, path);
-    const info = lstatSync(absolute);
+    const info = fileSystem.lstatSync(absolute);
 
-    if (info.isDirectory()) readdirSync(absolute);
+    if (info.isDirectory()) fileSystem.readdirSync(absolute);
 
     return true;
   } catch {
     try {
       const absolute = join(sourcePath, path);
-      const info = lstatSync(absolute);
+      const info = fileSystem.lstatSync(absolute);
 
       if (info.isDirectory()) onUnobservable?.(path, "directory");
     } catch {

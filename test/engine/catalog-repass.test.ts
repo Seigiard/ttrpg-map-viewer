@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { acquireOutputTree } from "@seigiard/sync-engine";
 import { Deferred, Effect, Exit } from "effect";
-import { chmod, mkdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { lstatSync, readdirSync } from "node:fs";
+import { mkdir, readFile, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { openCatalogSynchronization, startCatalogSynchronization } from "../../src/catalog/engine/composition.ts";
 import { includeObservableCollectionSource } from "../../src/catalog/engine/policy.ts";
@@ -564,16 +565,15 @@ describe("failures", () => {
   });
 
   test("an unreadable subfolder keeps its parent category, loose map and prior child output", async () => {
-    if (process.getuid?.() === 0) return;
+    let innerUnreadable = false;
 
-    await withSession(workspace, async (session) => {
-      // #given
-      const innerBefore = await readFile(join(workspace.output, "Mixed", "Inner", "index.json"), "utf8");
-      const looseBefore = await readFile(join(workspace.output, "Mixed", "._loose", "index.json"), "utf8");
-      const unreadable = join(workspace.collection, "Mixed", "Inner");
-
-      try {
-        await chmod(unreadable, 0o000);
+    await withSession(
+      workspace,
+      async (session) => {
+        // #given
+        const innerBefore = await readFile(join(workspace.output, "Mixed", "Inner", "index.json"), "utf8");
+        const looseBefore = await readFile(join(workspace.output, "Mixed", "._loose", "index.json"), "utf8");
+        innerUnreadable = true;
 
         // #when
         await passOf(session);
@@ -582,10 +582,18 @@ describe("failures", () => {
         expect(await readFile(join(workspace.output, "Mixed", "Inner", "index.json"), "utf8")).toBe(innerBefore);
         expect(await readFile(join(workspace.output, "Mixed", "._loose", "index.json"), "utf8")).toBe(looseBefore);
         expect((await Effect.runPromise(session.status)).failure).toBeNull();
-      } finally {
-        await chmod(unreadable, 0o755).catch(() => undefined);
-      }
-    });
+      },
+      {
+        sourcePolicyFileSystem: {
+          lstatSync,
+          readdirSync: (path) => {
+            if (innerUnreadable && path === join(workspace.collection, "Mixed", "Inner")) throw new Error("simulated unreadable directory");
+
+            return readdirSync(path);
+          },
+        },
+      },
+    );
 
     expect((await readJson<CategoryIndex>(join(workspace.output, "Mixed", "index.json"))).maps.map((map) => map.path)).toContain(
       "Mixed/Inner",

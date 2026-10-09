@@ -12,7 +12,7 @@ import type { DerivedImageFailure, DerivedImageKind } from "../thumbnail.ts";
 import { handleCatalogWork } from "./handlers.ts";
 import { createImageFailureRegistry, type ImageFailureRegistry } from "./image-status.ts";
 import { listingFromEntries } from "./listing.ts";
-import { catalogStatePath, includeObservableCollectionSource, type UnobservableSourceKind } from "./policy.ts";
+import { catalogStatePath, includeObservableCollectionSource, type SourcePolicyFileSystem, type UnobservableSourceKind } from "./policy.ts";
 import {
   CategoryWork,
   FinalizeIndexesWork,
@@ -33,6 +33,7 @@ export interface CatalogSynchronizationOptions {
   readonly imageFailures?: ImageFailureRegistry;
   readonly beforeImageWork?: (map: MapNode, variant: FileListing, kind: DerivedImageKind) => Effect.Effect<void>;
   readonly beforeMapIndexWrite?: (map: MapNode, present: ReadonlySet<string>) => Effect.Effect<void>;
+  readonly sourcePolicyFileSystem?: SourcePolicyFileSystem;
   /** Zero disables the engine's periodic reconciliation. */
   readonly reconcileIntervalMs: number;
 }
@@ -101,7 +102,12 @@ function catalogLiveOptions(
     outputPath: options.dataPath,
     statePath: catalogStatePath(options.dataPath),
     includeSource: (path) =>
-      includeObservableCollectionSource(options.filesPath, path, (unobservable, kind) => unobservableSources.set(unobservable, kind)),
+      includeObservableCollectionSource(
+        options.filesPath,
+        path,
+        (unobservable, kind) => unobservableSources.set(unobservable, kind),
+        options.sourcePolicyFileSystem,
+      ),
     reconcileIntervalMs: options.reconcileIntervalMs,
     handle: handleCatalogWork,
     concurrency: options.thumbnailConcurrency,

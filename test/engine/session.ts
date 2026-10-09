@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { openCatalogSynchronization } from "../../src/catalog/engine/composition.ts";
+import { openCatalogSynchronization, type CatalogSynchronizationOptions } from "../../src/catalog/engine/composition.ts";
 import type { Workspace } from "./collection-fixture.ts";
 
 export type Session = Effect.Success<ReturnType<typeof openCatalogSynchronization>>;
@@ -15,11 +15,15 @@ export function sessionOptions(workspace: Workspace) {
 }
 
 /** Opens the composition, runs the callback while the session holds the output tree, and closes it. */
-export function withSession<A>(workspace: Workspace, run: (session: Session) => Promise<A>): Promise<A> {
+export function withSession<A>(
+  workspace: Workspace,
+  run: (session: Session) => Promise<A>,
+  overrides: Partial<CatalogSynchronizationOptions> = {},
+): Promise<A> {
   return Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const session = yield* openCatalogSynchronization(sessionOptions(workspace));
+        const session = yield* openCatalogSynchronization({ ...sessionOptions(workspace), ...overrides });
 
         return yield* Effect.promise(() => run(session)).pipe(Effect.uninterruptible);
       }),
