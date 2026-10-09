@@ -2,7 +2,7 @@ import { existsSync, lstatSync, mkdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import type { PlanEntry } from "./plan.ts";
 
-export interface Validation {
+interface Validation {
   todo: PlanEntry[];
   alreadyDone: PlanEntry[];
   problems: string[];
@@ -15,7 +15,7 @@ export interface ApplyReport extends Validation {
 }
 
 /** Checks every entry against the disk without changing anything. */
-export function validatePlan(dumpDir: string, entries: PlanEntry[]): Validation {
+function validatePlan(dumpDir: string, entries: PlanEntry[]): Validation {
   const result: Validation = { todo: [], alreadyDone: [], problems: [] };
 
   if (!isDir(dumpDir)) {

@@ -45,7 +45,7 @@ export interface Classification {
 
 const nameCollator = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 
-export function compareNames(a: string, b: string): number {
+function compareNames(a: string, b: string): number {
   return nameCollator.compare(a, b) || (a < b ? -1 : a > b ? 1 : 0);
 }
 

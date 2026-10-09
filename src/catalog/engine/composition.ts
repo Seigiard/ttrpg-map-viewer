@@ -4,6 +4,7 @@ import { log } from "../../logging/index.ts";
 import { classifyCollection, type CategoryNode, type FileListing, type FolderListing, type MapNode } from "../classify.ts";
 import { loadCoverOverrides, warnUnknownCoverOverrides } from "../cover.ts";
 import { mtimeOrNull, type FileSystemError } from "../file-system.ts";
+import { previewPath, thumbnailPath } from "../folder-index.ts";
 import { loadMetadataSources } from "../metadata.ts";
 import { INDEX_FILE } from "../model.ts";
 import { expectedOutputManifest, pruneOrphans } from "../output-manifest.ts";
@@ -20,6 +21,7 @@ import {
 import {
   CategoryWork,
   FinalizeIndexesWork,
+  ImageWork,
   imageWorkKey,
   MapWork,
   SearchWork,
@@ -82,11 +84,19 @@ function logDiagnostics(listing: FolderListing, maps: readonly MapNode[]): void 
   log.info("Generate", "Collection diagnostics", { zipArchives: archives.length, likelyDumps: likelyDumps.length });
 }
 
+function variantSourcePath(map: MapNode, variant: FileListing): string {
+  return map.sourcePath === "" ? variant.name : `${map.sourcePath}/${variant.name}`;
+}
+
+function orderedVariants(map: MapNode): readonly FileListing[] {
+  return [map.cover, ...map.variants.filter((variant) => variant !== map.cover)];
+}
+
 /**
  * The TTRPG declaration of a live session. The engine owns scanning, scheduling, reconciliation and shutdown;
  * this module only gives the observed source its meaning and says what each index depends on.
  */
-export function catalogLiveOptions(options: CatalogSynchronizationOptions): LiveOptions<CatalogWork, FileSystemError, never> {
+function catalogLiveOptions(options: CatalogSynchronizationOptions): LiveOptions<CatalogWork, FileSystemError, never> {
   const imageFailures = options.imageFailures ?? createImageFailureRegistry();
   const unobservableSources = new Map<string, UnobservableSourceKind>();
 
@@ -106,6 +116,20 @@ export function catalogLiveOptions(options: CatalogSynchronizationOptions): Live
     concurrency: options.thumbnailConcurrency,
     key: workKey,
     failureKey: workKey,
+    freshness: {
+      describe: (work) => {
+        if (!(work instanceof ImageWork)) return undefined;
+
+        if (work.pass.failedInitialMaps.has(work.map.path)) return undefined;
+
+        return {
+          sourcePaths: [variantSourcePath(work.map, work.variant)],
+          resultKind: "ttrpg-derived-image",
+          processingVersion: "2",
+          outputPaths: [previewPath(work.map.path, work.variant.name), thumbnailPath(work.map.path, work.variant.name)],
+        };
+      },
+    },
     recovery: {
       existing: mtimeOrNull(`${options.dataPath}/${INDEX_FILE}`).pipe(
         Effect.map((mtime) => mtime !== null),
@@ -152,7 +176,7 @@ export function catalogLiveOptions(options: CatalogSynchronizationOptions): Live
           maps,
           skippedDirectories,
           initialMapWritesRemaining: { count: maps.length },
-          initialImages: [],
+          failedInitialMaps: new Set(),
         };
 
         const declaredImageKeys = new Set(
@@ -171,7 +195,11 @@ export function catalogLiveOptions(options: CatalogSynchronizationOptions): Live
           work:
             maps.length === 0
               ? [...categories.map((category) => new CategoryWork({ category, pass })), new SearchWork({ pass })]
-              : [...maps.map((map) => new MapWork({ map, pass, cascadeIndexes: false, initial: true })), new FinalizeIndexesWork({ pass })],
+              : [
+                  ...maps.map((map) => new MapWork({ map, pass, cascadeIndexes: false, initial: true })),
+                  new FinalizeIndexesWork({ pass }),
+                  ...maps.flatMap((map) => orderedVariants(map).map((variant) => new ImageWork({ map, variant, remaining: [], pass }))),
+                ],
           publish: expectedOutputManifest(categories, maps, options.dataPath, options.overridesPath, preservePrefixes).pipe(
             Effect.andThen((manifest) => pruneOrphans(options.dataPath, manifest, startedAt)),
             Effect.tap(() =>

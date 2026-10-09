@@ -9,7 +9,7 @@ import type { MapMetadata, MapSize, VariantMetadata } from "./model.ts";
 
 /* oxlint-disable anti-slop/no-runtime-typeof, anti-slop/no-unknown-parameters, anti-slop/no-unsafe-dictionary-type, anti-slop/require-safety-comment-for-type-assertion -- Third-party JSON is validated at this parse boundary before it enters the catalog domain. */
 
-export interface ImageDimensions {
+interface ImageDimensions {
   readonly width: number;
   readonly height: number;
 }
@@ -21,7 +21,7 @@ interface CzepekuVariant {
   readonly grid: string;
 }
 
-export interface CzepekuEntry {
+interface CzepekuEntry {
   readonly name: string;
   readonly type: "map" | "scene" | "None";
   readonly cats: readonly string[];
@@ -115,7 +115,7 @@ function parseCzepeku(content: string, path: string): readonly CzepekuEntry[] {
   }
 }
 
-export interface MetadataListing {
+interface MetadataListing {
   readonly czepekuPath?: string;
   readonly czepekuDirectory?: string;
   readonly folders: ReadonlyMap<string, FolderListing>;

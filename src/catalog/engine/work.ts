@@ -21,7 +21,7 @@ export interface PassContext {
   readonly maps: readonly MapNode[];
   readonly skippedDirectories: ReadonlySet<CatalogPath>;
   readonly initialMapWritesRemaining: { count: number };
-  readonly initialImages: Array<{ readonly map: MapNode; readonly variant: FileListing; readonly remaining: readonly FileListing[] }>;
+  readonly failedInitialMaps: Set<CatalogPath>;
 }
 
 export class MapWork extends Data.TaggedClass("MapWork")<{

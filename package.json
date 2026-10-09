@@ -17,7 +17,7 @@
     "build:ui": "bun ui/scripts/build-ui.ts"
   },
   "dependencies": {
-    "@seigiard/sync-engine": "0.5.1",
+    "@seigiard/sync-engine": "0.5.2",
     "client-zip": "^2.5.1",
     "effect": "4.0.1",
     "sharp": "^0.35.5"

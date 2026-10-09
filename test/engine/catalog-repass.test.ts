@@ -143,6 +143,62 @@ describe("a later pass in the same engine session", () => {
     );
   }, 15_000);
 
+  test("cold start publishes the first map's derived references while the last map preview is still held", async () => {
+    await image(join(workspace.collection, "AAA First", "First.png"), 40, 40, "png");
+    await image(join(workspace.collection, "MMM Middle", "Middle.png"), 40, 40, "png");
+    await image(join(workspace.collection, "ZZZ Held", "Held.png"), 40, 40, "png");
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          // #given
+          const entered = yield* Deferred.make<void>();
+          const release = yield* Deferred.make<void>();
+
+          const session = yield* startCatalogSynchronization({
+            ...sessionOptions(workspace),
+            beforeImageWork: (map, _variant, kind) =>
+              map.path === "ZZZ Held" && kind === "preview"
+                ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+                : Effect.void,
+          });
+
+          yield* Deferred.await(entered);
+
+          // #when
+          yield* ownedPromise(
+            async () => {
+              for (let attempt = 0; attempt < 50; attempt += 1) {
+                const first = await readJson<MapIndex>(join(workspace.output, "AAA First", "index.json"));
+                const variant = first.variants[0]!;
+
+                if (
+                  variant.preview === "AAA First/_previews/First.png.webp" &&
+                  variant.thumbnail === "AAA First/_thumbnails/First.png.webp"
+                )
+                  return;
+                await new Promise((resolve) => setTimeout(resolve, 10));
+              }
+
+              throw new Error("first map references did not publish while the last map preview was held");
+            },
+            (cause) => new Error(String(cause)),
+          );
+
+          // #then
+          const held = yield* ownedPromise(
+            () => readJson<MapIndex>(join(workspace.output, "ZZZ Held", "index.json")),
+            (cause) => new Error(String(cause)),
+          );
+
+          expect(held.variants[0]?.preview).toBeNull();
+          yield* Deferred.succeed(release, undefined);
+          yield* session.awaitCompletion;
+        }),
+      ),
+    );
+  }, 15_000);
+
   test("category and search indexes wait for slow initial map writes", async () => {
     await Effect.runPromise(
       Effect.scoped(
@@ -212,6 +268,50 @@ describe("a later pass in the same engine session", () => {
       "New Keep",
     ]);
   });
+
+  test("adding one variant reprocesses only the new variant", async () => {
+    const imageWork = new Map<string, number>();
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          // #given
+          const session = yield* startCatalogSynchronization({
+            ...sessionOptions(workspace),
+            beforeImageWork: (_map, variant, kind) =>
+              Effect.sync(() => {
+                imageWork.set(`${variant.name}:${kind}`, (imageWork.get(`${variant.name}:${kind}`) ?? 0) + 1);
+              }),
+          });
+
+          yield* session.awaitCompletion;
+          imageWork.clear();
+
+          // #when
+          const newVariant = join(PIT, "New Chamber.png");
+
+          yield* ownedPromise(
+            () => image(join(workspace.collection, newVariant), 64, 64, "png"),
+            (cause) => new Error(String(cause)),
+          );
+          yield* session.notify([newVariant]);
+          yield* session.awaitCompletion;
+        }),
+      ),
+    );
+
+    // #then
+    expect([...imageWork].sort()).toEqual([
+      ["New Chamber.png:preview", 1],
+      ["New Chamber.png:thumbnail", 1],
+    ]);
+    expect((await readJson<MapIndex>(join(workspace.output, PIT, "index.json"))).variants.map((variant) => variant.file).sort()).toEqual([
+      "Empty Day.jpg",
+      "New Chamber.png",
+      "Original Night.jpg",
+      "Rain.webm",
+    ]);
+  }, 15_000);
 
   test("removes the output of a source that is confirmed gone, and keeps the engine state", async () => {
     // #given

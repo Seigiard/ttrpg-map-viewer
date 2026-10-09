@@ -45,10 +45,6 @@ function existingDerivedImages(map: MapNode, dataPath: string): Effect.Effect<Re
   ).pipe(Effect.map((keys) => new Set(keys.flat())));
 }
 
-function orderedVariants(map: MapNode): readonly FileListing[] {
-  return [map.cover, ...map.variants.filter((variant) => variant !== map.cover)];
-}
-
 function indexCascades(map: MapNode, pass: PassContext): readonly CatalogWork[] {
   const parent = pass.categories.get(parentOf(map.path));
 
@@ -80,21 +76,18 @@ function writeMapIndex(map: MapNode, pass: PassContext, cascadeIndexes: boolean)
 
 function handleMap({ map, pass, cascadeIndexes, initial }: MapWork): Effect.Effect<readonly CatalogWork[], FileSystemError> {
   return Effect.gen(function* () {
-    const variants = orderedVariants(map);
-
     yield* writeMapIndex(map, pass, false).pipe(
+      Effect.tapError(() =>
+        Effect.sync(() => {
+          if (initial) pass.failedInitialMaps.add(map.path);
+        }),
+      ),
       Effect.ensuring(
         Effect.sync(() => {
           if (initial) pass.initialMapWritesRemaining.count = Math.max(0, pass.initialMapWritesRemaining.count - 1);
         }),
       ),
     );
-
-    if (initial) {
-      const first = variants[0];
-
-      if (first) pass.initialImages.push({ map, variant: first, remaining: variants.slice(1) });
-    }
 
     const cascades = cascadeIndexes && pass.initialMapWritesRemaining.count === 0 ? indexCascades(map, pass) : [];
 
@@ -103,15 +96,19 @@ function handleMap({ map, pass, cascadeIndexes, initial }: MapWork): Effect.Effe
 }
 
 function handleFinalizeIndexes({ pass }: FinalizeIndexesWork): Effect.Effect<readonly CatalogWork[], FileSystemError> {
-  if (pass.initialMapWritesRemaining.count > 0) return Effect.sleep(10).pipe(Effect.as([new FinalizeIndexesWork({ pass })]));
+  if (pass.initialMapWritesRemaining.count > 0)
+    return Effect.sleep(10).pipe(Effect.andThen(Effect.suspend(() => handleFinalizeIndexes(new FinalizeIndexesWork({ pass })))));
 
-  return Effect.succeed([
-    ...[...pass.categories.values()].flatMap((category) =>
-      pass.skippedDirectories.has(category.path) ? [] : [new CategoryWork({ category, pass })],
-    ),
-    new SearchWork({ pass }),
-    ...pass.initialImages.splice(0).map(({ map, variant, remaining }) => new ImageWork({ map, variant, remaining, pass })),
-  ]);
+  return Effect.gen(function* () {
+    yield* Effect.forEach(
+      pass.categories.values(),
+      (category) => (pass.skippedDirectories.has(category.path) ? Effect.void : handleCategory(category, pass.dataPath)),
+      { discard: true },
+    );
+    yield* handleSearch(pass);
+
+    return [];
+  });
 }
 
 function renderDerivedImages(
@@ -152,6 +149,13 @@ function renderDerivedImages(
 
 function handleImage({ map, variant, remaining, pass }: ImageWork): Effect.Effect<readonly CatalogWork[], FileSystemError> {
   return Effect.gen(function* () {
+    if (pass.initialMapWritesRemaining.count > 0)
+      return yield* Effect.sleep(10).pipe(
+        Effect.andThen(Effect.suspend(() => handleImage(new ImageWork({ map, variant, remaining, pass })))),
+      );
+
+    if (pass.failedInitialMaps.has(map.path)) return [];
+
     const previewKey = imageWorkKey(map.path, variant.name, "preview");
     const thumbnailKey = imageWorkKey(map.path, variant.name, "thumbnail");
 

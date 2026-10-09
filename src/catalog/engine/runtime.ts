@@ -17,7 +17,7 @@ export interface EngineRuntime {
   readonly stop: () => Promise<void>;
 }
 
-export interface EngineStatus {
+interface EngineStatus {
   readonly available: boolean;
   readonly availableFrom: string | null;
   readonly verifying: boolean;

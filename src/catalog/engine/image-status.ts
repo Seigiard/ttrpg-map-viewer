@@ -1,4 +1,4 @@
-export interface ImageWorkFailure {
+interface ImageWorkFailure {
   readonly work: string;
   readonly message: string;
 }

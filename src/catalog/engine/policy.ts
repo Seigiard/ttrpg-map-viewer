@@ -7,7 +7,7 @@ export type UnobservableSourceKind = "directory" | "file";
 export type SourceObservabilityOverride = (path: string) => UnobservableSourceKind | "observable" | undefined;
 
 /** Hidden collection entries are never catalogued, so the engine state directory cannot collide with a source name. */
-export function includeCollectionSource(path: string): boolean {
+function includeCollectionSource(path: string): boolean {
   return !path.split("/").some((name) => name.startsWith("."));
 }
 

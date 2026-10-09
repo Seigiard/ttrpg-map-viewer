@@ -43,7 +43,7 @@ export interface Cover {
   readonly thumbnail: CatalogPath | null;
 }
 
-export interface CategoryCard {
+interface CategoryCard {
   readonly name: string;
   readonly path: CatalogPath;
 }

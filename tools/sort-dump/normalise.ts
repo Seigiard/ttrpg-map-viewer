@@ -1,5 +1,3 @@
-export const VARIANT_EXTENSIONS = ["webp", "jpg", "jpeg", "png", "webm", "mp4", "dd2vtt"] as const;
-
 const EXTENSION_RE = /\.(webp|jpe?g|png|webm|mp4|dd2vtt)$/i;
 
 const KOPIE_SUFFIX_RE = /[\s_-]*kopie$/i;

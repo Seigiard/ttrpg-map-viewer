@@ -1,0 +1,6 @@
+{
+  "entry": ["ui/app/main.ts", "tools/sort-dump/sort-dump.ts", "test/**/*.test.ts", "tools/**/*.test.ts"],
+  "project": ["src/**/*.ts", "ui/**/*.ts", "tools/**/*.ts", "test/**/*.ts"],
+  "ignore": ["tools/oxlint/anti-slop/**"],
+  "ignoreBinaries": ["ffmpeg"]
+}

@@ -11,9 +11,9 @@ interface FailureProps {
   readonly message: string;
 }
 
-export class FileSystemNotFound extends Data.TaggedError("FileSystemNotFound")<FailureProps> {}
+class FileSystemNotFound extends Data.TaggedError("FileSystemNotFound")<FailureProps> {}
 
-export class FileSystemFailure extends Data.TaggedError("FileSystemFailure")<FailureProps> {}
+class FileSystemFailure extends Data.TaggedError("FileSystemFailure")<FailureProps> {}
 
 export type FileSystemError = FileSystemNotFound | FileSystemFailure;
 
