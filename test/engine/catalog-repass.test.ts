@@ -765,6 +765,7 @@ describe("failures", () => {
       await runtime.ready;
       innerUnreadable = true;
       await runtime.requestPass();
+      await waitForRuntimeError(runtime, "source:Mixed/Inner");
 
       // #when
       innerUnreadable = false;
@@ -776,6 +777,25 @@ describe("failures", () => {
         "Mixed/Inner",
       );
       expect((await searchPaths()).filter((path) => path === "Mixed/Inner")).toHaveLength(1);
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  test("a stale recorded skipped directory is ignored when the current pass observes it as readable", async () => {
+    const runtime = startEngineRuntime({
+      ...sessionOptions(workspace),
+      sourcePolicyInitialUnobservable: new Map([["Mixed/Inner", { kind: "directory", message: "stale post-publish skip" }]]),
+    });
+
+    try {
+      await runtime.ready;
+      await waitForRuntimeRecovery(runtime, "stale recorded skipped directory");
+
+      const mixed = await readJson<CategoryIndex>(join(workspace.output, "Mixed", "index.json"));
+      expect(mixed.maps.map((map) => map.path)).toContain("Mixed/Inner");
+      expect((await searchPaths()).filter((path) => path === "Mixed/Inner")).toHaveLength(1);
+      expect((await runtime.status()).errors).toEqual([]);
     } finally {
       await runtime.stop();
     }
@@ -838,23 +858,68 @@ describe("failures", () => {
 
   test("a failed image re-render is retried after restart instead of being committed fresh", async () => {
     // #given
-    await withSession(workspace, async () => undefined);
-    await writeFile(join(workspace.collection, "Mixed", "Inner", "Room.jpg"), "not an image");
-    await withSession(workspace, async (session) => {
-      await passOf(session);
+    let failRoomPreview = false;
+    let staleRootIndex = "";
+    let staleSearchIndex = "";
 
-      const category = await readJson<CategoryIndex>(join(workspace.output, "Mixed", "index.json"));
-      expect(category.maps.find((map) => map.path === "Mixed/Inner")?.cover.thumbnail).toBeNull();
-      expect(
-        (await readJson<SearchIndex>(join(workspace.output, "search.json"))).maps.find((map) => map.path === "Mixed/Inner")?.thumbnail,
-      ).toBeNull();
-    });
+    await rm(workspace.collection, { recursive: true, force: true });
+    await image(join(workspace.collection, "Solo", "Room.jpg"), 48, 48, "jpeg");
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const session = yield* startCatalogSynchronization({
+            ...sessionOptions(workspace),
+            beforeImageWork: (map, variant, kind) => {
+              if (!failRoomPreview || map.path !== "Solo" || variant.name !== "Room.jpg" || kind !== "preview") return Effect.void;
+
+              return ownedPromise(
+                async () => {
+                  await writeFile(join(workspace.output, "index.json"), staleRootIndex);
+                  await writeFile(join(workspace.output, "search.json"), staleSearchIndex);
+                },
+                (cause) => new Error(String(cause)),
+              ).pipe(Effect.orDie);
+            },
+          });
+
+          yield* session.awaitCompletion;
+          staleRootIndex = yield* ownedPromise(
+            () => readFile(join(workspace.output, "index.json"), "utf8"),
+            (cause) => new Error(String(cause)),
+          );
+          staleSearchIndex = yield* ownedPromise(
+            () => readFile(join(workspace.output, "search.json"), "utf8"),
+            (cause) => new Error(String(cause)),
+          );
+
+          expect(JSON.parse(staleRootIndex).maps.find((map: { path: string }) => map.path === "Solo")?.cover.thumbnail).toBe(
+            "Solo/_thumbnails/Room.jpg.webp",
+          );
+
+          yield* ownedPromise(
+            () => writeFile(join(workspace.collection, "Solo", "Room.jpg"), "not an image"),
+            (cause) => new Error(String(cause)),
+          );
+          failRoomPreview = true;
+
+          yield* session.requestPass({ force: false });
+          yield* session.awaitCompletion;
+        }),
+      ),
+    );
+
+    const category = await readJson<CategoryIndex>(join(workspace.output, "index.json"));
+    expect(category.maps.find((map) => map.path === "Solo")?.cover.thumbnail).toBeNull();
+    expect(
+      (await readJson<SearchIndex>(join(workspace.output, "search.json"))).maps.find((map) => map.path === "Solo")?.thumbnail,
+    ).toBeNull();
 
     // #when
     await withSession(workspace, async () => undefined);
 
     // #then
-    const index = await readJson<MapIndex>(join(workspace.output, "Mixed", "Inner", "index.json"));
+    const index = await readJson<MapIndex>(join(workspace.output, "Solo", "index.json"));
     expect(index.variants[0]?.preview).toBeNull();
     expect(index.variants[0]?.thumbnail).toBeNull();
   });

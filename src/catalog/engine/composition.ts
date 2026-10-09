@@ -36,6 +36,7 @@ export interface CatalogSynchronizationOptions {
   readonly beforeImageWork?: (map: MapNode, variant: FileListing, kind: DerivedImageKind) => Effect.Effect<void>;
   readonly beforeMapIndexWrite?: (map: MapNode, present: ReadonlySet<string>) => Effect.Effect<void>;
   readonly sourcePolicyFileSystem?: SourcePolicyFileSystem;
+  readonly sourcePolicyInitialUnobservable?: ReadonlyMap<string, UnobservableSource>;
   /** Zero disables the engine's periodic reconciliation. */
   readonly reconcileIntervalMs: number;
 }
@@ -146,7 +147,7 @@ function catalogLiveOptions(
 ): LiveOptions<CatalogWork, FileSystemError | DerivedImageFailure, never> {
   const imageFailures = options.imageFailures ?? createImageFailureRegistry();
   const sourceFailures = options.sourceFailures ?? createSourceFailureRegistry();
-  const unobservableSources = new Map<string, UnobservableSource>();
+  const unobservableSources = new Map<string, UnobservableSource>(options.sourcePolicyInitialUnobservable);
 
   return {
     sourcePath: options.filesPath,
