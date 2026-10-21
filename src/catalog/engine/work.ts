@@ -1,7 +1,9 @@
 import { Data, Effect, Match, Semaphore } from "effect";
 import type { CategoryNode, FileListing, MapNode } from "../classify.ts";
+import type { ClassificationOptions, ClassificationStatusRegistry } from "../classification.ts";
 import type { VariantDimensions } from "../metadata.ts";
 import type { CatalogPath } from "../model.ts";
+import type { Classification } from "../model.ts";
 import type { DerivedImageKind } from "../thumbnail.ts";
 import type { ImageFailureRegistry } from "./image-status.ts";
 
@@ -20,6 +22,9 @@ export interface PassContext {
   readonly refreshLocks: Map<CatalogPath, Semaphore.Semaphore>;
   readonly initialMapWritesRemaining: { count: number };
   readonly failedInitialMaps: Set<CatalogPath>;
+  readonly classification?: ClassificationOptions & { readonly status: ClassificationStatusRegistry };
+  readonly classifications: Map<CatalogPath, Classification>;
+  readonly classificationLock?: Semaphore.Semaphore;
 }
 
 export class MapWork extends Data.TaggedClass("MapWork")<{
@@ -39,13 +44,18 @@ export class ImageWork extends Data.TaggedClass("ImageWork")<{
   readonly pass: PassContext;
 }> {}
 
+export class ClassificationWork extends Data.TaggedClass("ClassificationWork")<{
+  readonly map: MapNode;
+  readonly pass: PassContext;
+}> {}
+
 export class ClearWorkFailure extends Data.TaggedClass("ClearWorkFailure")<{
   readonly failureKey: string;
   readonly onCleared: (failureKey: string) => void;
   readonly beforeClear?: (failureKey: string) => Effect.Effect<void>;
 }> {}
 
-export type CatalogWork = MapWork | CategoryWork | SearchWork | FinalizeIndexesWork | ImageWork | ClearWorkFailure;
+export type CatalogWork = MapWork | CategoryWork | SearchWork | FinalizeIndexesWork | ImageWork | ClassificationWork | ClearWorkFailure;
 
 export function imageWorkKey(mapPath: CatalogPath, variantName: string, kind: DerivedImageKind): string {
   return JSON.stringify(["image", mapPath, variantName, kind]);
@@ -60,6 +70,7 @@ export function workKey(work: CatalogWork): string {
       SearchWork: () => "search",
       FinalizeIndexesWork: () => "finalize-indexes",
       ImageWork: ({ map, variant }) => imageWorkKey(map.path, variant.name, "preview"),
+      ClassificationWork: ({ map }) => `classification:${map.path}`,
       ClearWorkFailure: ({ failureKey }) => `clear-failure:${failureKey}`,
     }),
   );

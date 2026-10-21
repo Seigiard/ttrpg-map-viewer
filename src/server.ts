@@ -1,4 +1,5 @@
 import { startEngineRuntime } from "./catalog/engine/runtime.ts";
+import { createAnthropicClassifier } from "./catalog/classification.ts";
 import { loadConfig } from "./config.ts";
 import { log } from "./logging/index.ts";
 import { mapZipResponse } from "./map-zip.ts";
@@ -11,6 +12,13 @@ const synchronization = startEngineRuntime({
   dataPath: config.dataPath,
   overridesPath: config.overridesPath,
   thumbnailConcurrency: config.thumbnailConcurrency,
+  classification: config.anthropicApiKey
+    ? {
+        classifier: createAnthropicClassifier({ apiKey: config.anthropicApiKey, model: config.classifyModel }),
+        concurrency: config.classifyConcurrency,
+        maxCalls: config.classifyMaxCalls,
+      }
+    : undefined,
   reconcileIntervalMs: config.reconcileIntervalMs,
 });
 

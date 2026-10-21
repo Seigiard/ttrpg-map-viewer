@@ -101,6 +101,8 @@ export function pruneOrphans(
 
         if (relativePath === "" && entry.name === ENGINE_STATE_DIRECTORY) return Effect.void;
 
+        if (relativePath === "" && entry.name === ".classification") return Effect.void;
+
         if (entry.isDirectory()) {
           const hasExpectedChild = manifest.directories.has(childPath);
 

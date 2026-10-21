@@ -18,6 +18,7 @@
     "prepare": "if [ -e .git ]; then lefthook install; fi"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.137.0",
     "@seigiard/sync-engine": "0.5.6",
     "client-zip": "^2.5.1",
     "effect": "4.0.1",

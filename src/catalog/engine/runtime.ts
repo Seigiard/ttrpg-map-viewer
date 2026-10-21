@@ -3,13 +3,14 @@ import { log } from "../../logging/index.ts";
 import { type CatalogSynchronizationOptions, startCatalogSynchronization } from "./composition.ts";
 import { createImageFailureRegistry } from "./image-status.ts";
 import { workFailureKey } from "./work.ts";
+import { createClassificationStatus, type ClassificationStatusSnapshot } from "../classification.ts";
 
 const REPORT_INTERVAL_MS = 5_000;
 
 const describeCause = (cause: Cause.Cause<unknown>) => Cause.pretty(cause).trim();
 
 export interface EngineRuntime {
-  /** Resolves when startup establishes usable output; rejects only when no output can be served. */
+  /** Resolves when startup establishes usable output; rejects if startup cannot establish a live session. */
   readonly ready: Promise<void>;
   /** Asks for a pass; the engine combines requests that arrive while one runs. */
   readonly requestPass: (force?: boolean) => Promise<void>;
@@ -32,6 +33,7 @@ interface EngineStatus {
     readonly pending: number;
     readonly errors: readonly { readonly work: string; readonly message: string }[];
   };
+  readonly classification: ClassificationStatusSnapshot;
 }
 
 /**
@@ -41,6 +43,11 @@ interface EngineStatus {
 export function startEngineRuntime(options: CatalogSynchronizationOptions): EngineRuntime {
   const controller = new AbortController();
   const imageFailures = createImageFailureRegistry();
+
+  const classificationStatus =
+    options.classification?.status ?? createClassificationStatus(options.classification ? "enabled" : "disabled");
+
+  const classification = options.classification ? { ...options.classification, status: classificationStatus } : undefined;
   const session = Promise.withResolvers<Effect.Success<ReturnType<typeof startCatalogSynchronization>>>();
   const ready = Promise.withResolvers<void>();
   session.promise.catch(() => undefined);
@@ -53,6 +60,7 @@ export function startEngineRuntime(options: CatalogSynchronizationOptions): Engi
       const workErrors = [
         ...status.work.errors.map((error) => ({ work: workFailureKey(error.work), message: describeCause(error.cause) })),
         ...imageFailures.snapshot(),
+        ...classificationStatus.errors().map((error) => ({ work: `classification:${error.path}`, message: error.message })),
       ];
 
       const workState = status.work.state === "complete" && workErrors.length > 0 ? "complete-with-errors" : status.work.state;
@@ -80,6 +88,7 @@ export function startEngineRuntime(options: CatalogSynchronizationOptions): Engi
           pending: status.work.pending,
           errors: workErrors,
         },
+        classification: classificationStatus.snapshot(),
       } satisfies EngineStatus;
     });
 
@@ -107,11 +116,18 @@ export function startEngineRuntime(options: CatalogSynchronizationOptions): Engi
   const running = Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const live = yield* startCatalogSynchronization({ ...options, imageFailures });
+        const live = yield* startCatalogSynchronization({
+          ...options,
+          imageFailures,
+          classification,
+          onMinimum: options.classification ? Effect.sync(() => ready.resolve()) : undefined,
+        });
+
         session.resolve(live);
         const reporter = yield* Effect.forkScoped(report(live));
 
         yield* live.ready;
+
         ready.resolve();
         yield* Fiber.join(reporter);
       }),
