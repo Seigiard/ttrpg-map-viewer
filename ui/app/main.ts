@@ -476,6 +476,23 @@ function fact(term: string, value: string): HTMLElement {
   return element("div", {}, element("dt", {}, term), element("dd", {}, value));
 }
 
+function classificationDetails(index: MapIndex): HTMLElement | undefined {
+  const classification = index.classification;
+
+  if (!classification) return undefined;
+
+  const tags = element(
+    "div",
+    { className: "classification-tags" },
+    ...classification.tags.map((tag) => element("span", { className: "tag" }, tag)),
+  );
+
+  tags.setAttribute("role", "list");
+  tags.setAttribute("aria-label", "Classification tags");
+
+  return element("div", { className: "classification" }, element("p", { className: "summary" }, classification.summary), tags);
+}
+
 function action(label: string, href: string, key: string | undefined, primary: boolean): HTMLAnchorElement {
   const link = element("a", { href, className: primary ? "primary" : "" }, element("span", {}, label), key ? kbd(key) : undefined);
 
@@ -550,7 +567,14 @@ function renderMap(index: MapIndex): void {
   const original = originalUrl(index.originalPath, variant.file);
 
   dock.replaceChildren(
-    element("div", { className: "about" }, element("h1", { className: "title" }, index.name), facts, variants),
+    element(
+      "div",
+      { className: "about" },
+      element("h1", { className: "title" }, index.name),
+      classificationDetails(index),
+      facts,
+      variants,
+    ),
     element(
       "div",
       { className: "actions" },
