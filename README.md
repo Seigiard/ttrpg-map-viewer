@@ -12,7 +12,11 @@ CI publishes `ghcr.io/seigiard/ttrpg-map-viewer` on every push to `main` (`lates
 - `DATA`: generated Catalog root. Default: `./out`. The generator owns this directory and removes unrecognized output during regeneration.
 - `OVERRIDES`: optional JSON file outside both the Collection and `DATA` that pins Covers. Default: `/config/overrides.json`. A missing file is ignored. Its shape is `{ "covers": { "<map path>": "<variant file>" } }`.
 - `PORT`: Bun listener port. Default: `3000`.
-- `THUMBNAIL_CONCURRENCY`: maximum concurrent synchronization work items, including index writes and Preview/Thumbnail jobs. Default: `2`.
+- `THUMBNAIL_CONCURRENCY`: maximum concurrent synchronization work items, including index writes, Preview/Thumbnail jobs, and classification requests. Default: `2`.
+- `ANTHROPIC_API_KEY`: optional key for Claude vision classification. When absent, classification is disabled.
+- `CLASSIFY_MODEL`: Anthropic model id. Default: `claude-haiku-5-5`.
+- `CLASSIFY_CONCURRENCY`: maximum concurrent classification requests. Default: `2`. Range: `1`-`8`. It can only lower effective classification parallelism below `THUMBNAIL_CONCURRENCY`.
+- `CLASSIFY_MAX_CALLS`: optional process-wide hard cap on classification API calls. Default: unlimited.
 - `RECONCILE_INTERVAL`: full regeneration interval in seconds. Default: `1800`. Range: `1`-`86400`.
 - `WATCHER_RETRY_SECONDS`: wait before restarting the collection watcher after `inotifywait` exits (for example when `fs.inotify.max_user_watches` is too low). Default: `60`. The periodic reconcile keeps the catalog current meanwhile.
 
