@@ -18,6 +18,10 @@ const maps: readonly SearchMap[] = [
     categoryPath: ["DnDavid", "Medieval"],
     thumbnail: null,
     variantCount: 1,
+    classification: {
+      tags: ["moonlit grotto"],
+      summary: "A shrine overlooks an underground lake.",
+    },
   },
 ];
 
@@ -42,5 +46,34 @@ describe("filterSearchMaps", () => {
 
     // #then
     expect(results).toEqual([maps[0]!]);
+  });
+
+  test("finds a Map by a word that appears only in its classification", () => {
+    // #given
+    const query = "grotto";
+
+    // #when
+    const results = filterSearchMaps(maps, query);
+
+    // #then
+    expect(results).toEqual([maps[1]!]);
+  });
+
+  test("finds a Map by a word that appears only in its classification summary", () => {
+    // #given
+    const summaryOnlyMap: SearchMap = {
+      name: "Fallen Observatory",
+      path: "Czepeku/Arcane/Fallen Observatory",
+      categoryPath: ["Czepeku", "Arcane"],
+      thumbnail: null,
+      variantCount: 1,
+      classification: { tags: ["ruin"], summary: "A periscope overlooks a silent crater." },
+    };
+
+    // #when
+    const results = filterSearchMaps([...maps, summaryOnlyMap], "periscope");
+
+    // #then
+    expect(results).toEqual([summaryOnlyMap]);
   });
 });

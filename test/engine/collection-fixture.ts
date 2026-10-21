@@ -22,7 +22,7 @@ export async function image(path: string, width: number, height: number, format:
     .toFile(path);
 }
 
-async function video(path: string): Promise<void> {
+export async function video(path: string): Promise<void> {
   await mkdir(join(path, ".."), { recursive: true });
 
   await new Promise<void>((resolve, reject) => {

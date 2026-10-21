@@ -684,6 +684,24 @@ describe("a later pass in the same engine session", () => {
   });
 });
 
+describe("optional catalog handlers", () => {
+  test("reports classification as disabled when no classifier is configured", async () => {
+    // #given
+    const runtime = startEngineRuntime(sessionOptions(workspace));
+
+    try {
+      // #when
+      await runtime.ready;
+      const status = await runtime.status();
+
+      // #then
+      expect(status).toMatchObject({ classification: { state: "disabled" } });
+    } finally {
+      await runtime.stop();
+    }
+  });
+});
+
 describe("failures", () => {
   test("a failed map write is reported, independent work finishes, and the next pass repairs it", async () => {
     // #given
