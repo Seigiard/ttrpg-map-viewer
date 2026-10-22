@@ -1,14 +1,29 @@
 import { openLiveSynchronization, startLiveSynchronization, type LiveOptions, type SourceEntry } from "@seigiard/sync-engine";
-import { Effect } from "effect";
+import { Effect, Semaphore } from "effect";
+import { join } from "node:path";
 import { log } from "../../logging/index.ts";
-import { classifyCollection, type CategoryNode, type FileListing, type FolderListing, type MapNode } from "../classify.ts";
+import {
+  classifyCollection,
+  isAnimatedVariant,
+  type CategoryNode,
+  type FileListing,
+  type FolderListing,
+  type MapNode,
+} from "../classify.ts";
 import { loadCoverOverrides, selectMapCover, warnUnknownCoverOverrides } from "../cover.ts";
-import { mtimeOrNull, type FileSystemError } from "../file-system.ts";
+import { mtimeOrNull, readTextFile, type FileSystemError } from "../file-system.ts";
 import { previewPath, thumbnailPath } from "../folder-index.ts";
 import { enrichMap, loadMetadataSources, readVariantDimensions } from "../metadata.ts";
-import { INDEX_FILE } from "../model.ts";
+import { INDEX_FILE, type CatalogPath, type Classification } from "../model.ts";
+import {
+  CLASSIFICATION_PROMPT_VERSION,
+  classificationCacheKey,
+  createClassificationStatus,
+  readClassificationCache,
+  type ClassificationOptions,
+} from "../classification.ts";
 import { expectedOutputManifest, pruneOrphans } from "../output-manifest.ts";
-import type { DerivedImageFailure, DerivedImageKind } from "../thumbnail.ts";
+import { sourceSignature, type DerivedImageFailure, type DerivedImageKind } from "../thumbnail.ts";
 import { handleCatalogWork } from "./handlers.ts";
 import { createImageFailureRegistry, type ImageFailureRegistry } from "./image-status.ts";
 import { listingFromEntries } from "./listing.ts";
@@ -25,6 +40,7 @@ import {
   workKey,
   workFailureKey,
   type PassContext,
+  ClassificationWork,
 } from "./work.ts";
 
 export interface CatalogSynchronizationOptions {
@@ -32,10 +48,12 @@ export interface CatalogSynchronizationOptions {
   readonly dataPath: string;
   readonly overridesPath: string;
   readonly thumbnailConcurrency: number;
+  readonly classification?: ClassificationOptions;
   readonly imageFailures?: ImageFailureRegistry;
   readonly beforeImageWork?: (map: MapNode, variant: FileListing, kind: DerivedImageKind) => Effect.Effect<void>;
   readonly beforeMapIndexWrite?: (map: MapNode, present: ReadonlySet<string>) => Effect.Effect<void>;
   readonly beforeClearWorkFailure?: (failureKey: string) => Effect.Effect<void>;
+  readonly onMinimum?: Effect.Effect<void>;
   readonly sourcePolicyFileSystem?: SourcePolicyFileSystem;
   /** Zero disables the engine's periodic reconciliation. */
   readonly reconcileIntervalMs: number;
@@ -94,10 +112,15 @@ function catalogLiveOptions(
   options: CatalogSynchronizationOptions,
 ): LiveOptions<CatalogWork, FileSystemError | DerivedImageFailure, never> {
   const imageFailures = options.imageFailures ?? createImageFailureRegistry();
+
+  const classification = options.classification
+    ? { ...options.classification, status: options.classification.status ?? createClassificationStatus() }
+    : undefined;
+
   let retainedFailureKeys = new Set<string>();
   const pendingStaleFailureKeys = new Set<string>();
 
-  return {
+  const live: LiveOptions<CatalogWork, FileSystemError | DerivedImageFailure, never> = {
     sourcePath: options.filesPath,
     outputPath: options.dataPath,
     statePath: catalogStatePath(options.dataPath),
@@ -105,6 +128,7 @@ function catalogLiveOptions(
     reconcileIntervalMs: options.reconcileIntervalMs,
     handle: handleCatalogWork,
     concurrency: options.thumbnailConcurrency,
+    onMinimum: options.onMinimum,
     key: workKey,
     failureKey: workFailureKey,
     freshness: {
@@ -148,6 +172,51 @@ function catalogLiveOptions(
         const dimensions = yield* readVariantDimensions(maps, options.filesPath);
         const passMaps = yield* Effect.forEach(maps, (map) => enrichMap(selectMapCover(map, overrides, dimensions), metadata, dimensions));
 
+        classification?.status.beginPass();
+        classification?.status.retain(new Set(passMaps.map((map) => map.path)));
+        const classifications = new Map<CatalogPath, Classification>();
+        const freshClassificationMaps = new Set<CatalogPath>();
+
+        if (classification) {
+          yield* Effect.forEach(passMaps, (map) => {
+            if (isAnimatedVariant(map.cover.name)) {
+              classification.status.skipAnimatedOnly(map.path);
+
+              return Effect.void;
+            }
+
+            const key = classificationCacheKey(map.cover.name, map.cover.size, map.cover.mtimeMs);
+
+            return readClassificationCache(options.dataPath, key).pipe(
+              Effect.flatMap((cached) => {
+                if (cached?.promptVersion === CLASSIFICATION_PROMPT_VERSION) {
+                  classifications.set(map.path, {
+                    tags: cached.tags,
+                    summary: cached.summary,
+                    model: cached.model,
+                    promptVersion: cached.promptVersion,
+                  });
+
+                  return Effect.void;
+                }
+
+                const preview = join(options.dataPath, previewPath(map.path, map.cover.name));
+                const expectedSignature = sourceSignature(map.cover.mtimeMs, map.cover.size);
+
+                return Effect.all([
+                  mtimeOrNull(preview),
+                  readTextFile(`${preview}.source.json`).pipe(Effect.catchTag("FileSystemNotFound", () => Effect.succeed(null))),
+                ]).pipe(
+                  Effect.map(([previewMtime, previewSignature]) => {
+                    if (previewMtime !== null && previewSignature === expectedSignature) freshClassificationMaps.add(map.path);
+                  }),
+                  Effect.catch(() => Effect.void),
+                );
+              }),
+            );
+          });
+        }
+
         const pass: PassContext = {
           filesPath: options.filesPath,
           dataPath: options.dataPath,
@@ -162,6 +231,9 @@ function catalogLiveOptions(
           refreshLocks: new Map(),
           initialMapWritesRemaining: { count: passMaps.length },
           failedInitialMaps: new Set(),
+          classification,
+          classifications,
+          classificationLock: classification ? Semaphore.makeUnsafe(classification.concurrency ?? 1) : undefined,
         };
 
         const declaredImageKeys = new Set(
@@ -184,6 +256,9 @@ function catalogLiveOptions(
                 ...passMaps.map((map) => new ImageWork({ map, variant: map.cover, pass })),
                 ...passMaps.flatMap((map) =>
                   map.variants.flatMap((variant) => (variant === map.cover ? [] : [new ImageWork({ map, variant, pass })])),
+                ),
+                ...passMaps.flatMap((map) =>
+                  classification && freshClassificationMaps.has(map.path) ? [new ClassificationWork({ map, pass })] : [],
                 ),
               ];
 
@@ -209,15 +284,16 @@ function catalogLiveOptions(
         return {
           minimum: [new CategoryWork({ category: root, pass })],
           work: [...staleFailures, ...work],
-          publish: expectedOutputManifest(categories, maps, options.dataPath, options.overridesPath).pipe(
-            Effect.andThen((manifest) => pruneOrphans(options.dataPath, manifest, startedAt)),
-            Effect.tap(() =>
-              Effect.sync(() => log.info("Generate", "Generation finished", { categories: categories.length, maps: maps.length })),
-            ),
-          ),
+          publish: Effect.gen(function* () {
+            const manifest = yield* expectedOutputManifest(categories, maps, options.dataPath, options.overridesPath);
+            yield* pruneOrphans(options.dataPath, manifest, startedAt);
+            yield* Effect.sync(() => log.info("Generate", "Generation finished", { categories: categories.length, maps: maps.length }));
+          }),
         };
       }),
   };
+
+  return live;
 }
 
 /** The handle returns at once; the caller keeps the Effect scope open. */

@@ -29,6 +29,17 @@ export interface MapMetadata {
   readonly mapSize?: MapSize;
 }
 
+export interface Classification {
+  /** Lowercase English tags generated from the cover preview. */
+  readonly tags: readonly string[];
+  /** One sentence describing the Map for text search. */
+  readonly summary: string;
+  /** Model id that produced the response. */
+  readonly model: string;
+  /** Prompt and schema version that produced the response. */
+  readonly promptVersion: number;
+}
+
 export interface VariantMetadata {
   /** Image pixels per grid cell. */
   readonly gridScale?: number;
@@ -53,6 +64,7 @@ export interface MapCard extends MapMetadata {
   readonly path: CatalogPath;
   readonly variantCount: number;
   readonly cover: Cover;
+  readonly classification?: Classification;
 }
 
 export interface SearchMap extends Pick<MapMetadata, "author" | "tags"> {
@@ -63,6 +75,7 @@ export interface SearchMap extends Pick<MapMetadata, "author" | "tags"> {
   /** Output-tree-relative path of the Cover Thumbnail; null when no thumbnail is published yet. */
   readonly thumbnail: CatalogPath | null;
   readonly variantCount: number;
+  readonly classification?: Pick<Classification, "tags" | "summary">;
 }
 
 export interface SearchIndex {
@@ -101,6 +114,7 @@ export interface MapIndex extends MapMetadata {
   readonly originalPath: CatalogPath;
   readonly cover: Cover;
   readonly variants: readonly Variant[];
+  readonly classification?: Classification;
 }
 
 export type FolderIndex = CategoryIndex | MapIndex;

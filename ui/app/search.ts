@@ -10,7 +10,16 @@ export function filterSearchMaps(maps: readonly SearchMap[], query: string): rea
   if (terms.length === 0) return [];
 
   return maps.filter((map) => {
-    const searchable = normalized([map.name, ...map.categoryPath, map.author ?? "", ...(map.tags ?? [])].join("/"));
+    const searchable = normalized(
+      [
+        map.name,
+        ...map.categoryPath,
+        map.author ?? "",
+        ...(map.tags ?? []),
+        ...(map.classification?.tags ?? []),
+        map.classification?.summary ?? "",
+      ].join("/"),
+    );
 
     return terms.every((term) => searchable.includes(term));
   });

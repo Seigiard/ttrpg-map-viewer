@@ -1,6 +1,6 @@
 import { isAnimatedVariant, type CategoryNode, type FileListing, type MapNode } from "./classify.ts";
 import { type VariantDimensions, variantKey } from "./metadata.ts";
-import type { CatalogPath, CategoryIndex, Cover, MapCard, MapIndex, SearchIndex } from "./model.ts";
+import type { CatalogPath, CategoryIndex, Classification, Cover, MapCard, MapIndex, SearchIndex } from "./model.ts";
 
 /** Leading underscore keeps derived files apart from mirrored folder names, which come from the collection. */
 const THUMBNAIL_DIR = "_thumbnails";
@@ -32,8 +32,13 @@ function coverOf(map: MapNode, hasDerivedImage: DerivedImageAvailability): Cover
   };
 }
 
-export function mapIndex(map: MapNode, hasDerivedImage: DerivedImageAvailability, dimensions: VariantDimensions): MapIndex {
-  return {
+export function mapIndex(
+  map: MapNode,
+  hasDerivedImage: DerivedImageAvailability,
+  dimensions: VariantDimensions,
+  classification?: Classification,
+): MapIndex {
+  const index: MapIndex = {
     kind: "map",
     name: map.name,
     path: map.path,
@@ -54,6 +59,10 @@ export function mapIndex(map: MapNode, hasDerivedImage: DerivedImageAvailability
       };
     }),
   };
+
+  if (classification) return { ...index, classification };
+
+  return index;
 }
 
 /** A map's card as its published index states it, so category listings follow what a reader can actually open. */
@@ -65,6 +74,7 @@ function mapCardFromIndex(index: MapIndex): MapCard {
     cover: index.cover,
     author: index.author,
     tags: index.tags,
+    classification: index.classification,
     mapSize: index.mapSize,
   };
 }
@@ -95,6 +105,7 @@ export function searchIndexFromPublished(published: readonly MapIndex[]): Search
         variantCount: index.variants.length,
         author: index.author,
         tags: index.tags,
+        classification: index.classification ? { tags: index.classification.tags, summary: index.classification.summary } : undefined,
       }))
       .sort((a, b) => a.path.localeCompare(b.path, "en", { sensitivity: "base" })),
   };

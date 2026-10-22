@@ -13,6 +13,10 @@ services:
       - FILES=/maps
       - DATA=/data
       # - THUMBNAIL_CONCURRENCY=2
+      # - ANTHROPIC_API_KEY=        # Enables cover classification when set.
+      # - CLASSIFY_MODEL=claude-haiku-5-5
+      # - CLASSIFY_CONCURRENCY=2    # Range: 1-8.
+      # - CLASSIFY_MAX_CALLS=50     # Optional process-wide cap.
     restart: unless-stopped
 
 volumes:
