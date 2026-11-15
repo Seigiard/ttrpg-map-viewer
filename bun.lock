@@ -6,7 +6,7 @@
       "name": "ttrpg-map-viewer",
       "dependencies": {
         "@anthropic-ai/sdk": "0.137.0",
-        "@seigiard/sync-engine": "0.5.6",
+        "@seigiard/sync-engine": "0.6.0",
         "client-zip": "^2.5.1",
         "effect": "4.0.1",
         "sharp": "^0.35.5",
@@ -162,7 +162,7 @@
 
     "@oxlint/plugins": ["@oxlint/plugins@1.87.0", "", {}, "sha512-OtSZ6NxNkS7bkVy7zk9zGnajz2hVIu0uRPP/dJvJesGRaXtimpA4lpxap7FaIJndG2UIoKhnBU4DxyDQIWv6yg=="],
 
-    "@seigiard/sync-engine": ["@seigiard/sync-engine@0.5.6", "", { "peerDependencies": { "effect": "4.0.1" } }, "sha512-jwoxuE+01kT1v0selO9NbSnXNnp+eIsWxN/1tDVoFXlWneMSjHWdwDe+tcNUx921eAJv9Dk8zBi48GMM3snerQ=="],
+    "@seigiard/sync-engine": ["@seigiard/sync-engine@0.6.0", "", { "peerDependencies": { "effect": "4.0.1" } }, "sha512-ixNSNLJ3GuLnW7LVo3t1UEfo4kMsvqJwmC8O7gq1FjfjtWq8GG8H641F+yBJi/v0U5RaXyD0nTountDIIiyCGA=="],
 
     "@stablelib/base64": ["@stablelib/base64@1.0.1", "", {}, "sha512-1bnPQqSxSuc3Ii6MhBysoWCg58j97aUjuCSZrGSmDxNqtytIi0k8utUenAwTZN4V5mXXYGsVUI9zeBqy+jBOSQ=="],
 
